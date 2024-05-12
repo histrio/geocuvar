@@ -244,6 +244,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "geocuvar"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "flate2",
+ "log",
+ "quick-xml",
+ "reqwest",
+ "serde",
+ "serde-xml-rs",
+ "serde_yaml",
+ "tokio",
+]
+
+[[package]]
 name = "gimli"
 version = "0.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -464,22 +480,6 @@ name = "log"
 version = "0.4.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
-
-[[package]]
-name = "mapchanges"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "env_logger",
- "flate2",
- "log",
- "quick-xml",
- "reqwest",
- "serde",
- "serde-xml-rs",
- "serde_yaml",
- "tokio",
-]
 
 [[package]]
 name = "memchr"
