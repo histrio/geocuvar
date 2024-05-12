@@ -101,13 +101,18 @@ async fn get_remote_latest_changeset_id() -> Result<i32> {
         .find(|line| line.starts_with(prefix))
         .and_then(|line| line.split('=').nth(1))
         .ok_or_else(|| anyhow::anyhow!("Changeset ID not found in the response"))
-        .and_then(|s| s.parse::<i32>().map_err(|e| anyhow::anyhow!("Failed to parse ID: {}", e)))
+        .and_then(|s| {
+            s.parse::<i32>()
+                .map_err(|e| anyhow::anyhow!("Failed to parse ID: {}", e))
+        })
 }
 
 async fn get_home_folder() -> Result<PathBuf> {
     let project_dir = std::env::current_dir().context("Failed to get current directory")?;
     let dir_path = project_dir.join("site/");
-    fs::create_dir_all(&dir_path).await.context("Failed to create directory")?;
+    fs::create_dir_all(&dir_path)
+        .await
+        .context("Failed to create directory")?;
     Ok(dir_path)
 }
 
@@ -116,9 +121,13 @@ async fn get_local_latest_changeset_id() -> Result<i32> {
     let file_path = dir_path.join("sequence");
 
     debug!("Local state file located at: {:?}", file_path);
-    fs::create_dir_all(&dir_path).await.context("Failed to create directory")?;
+    fs::create_dir_all(&dir_path)
+        .await
+        .context("Failed to create directory")?;
 
-    let file_content = fs::read_to_string(&file_path).await.unwrap_or_else(|_| "0".to_string());
+    let file_content = fs::read_to_string(&file_path)
+        .await
+        .unwrap_or_else(|_| "0".to_string());
     debug!("File content: {:?}", file_content);
 
     file_content
