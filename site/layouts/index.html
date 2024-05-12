@@ -1,0 +1,32 @@
+{{ define "title" }} Map Changes | Home {{ end }}
+{{ define "main" }}
+
+<div class="tags-list">
+    <ul>
+        {{ range $name, $taxonomy := .Site.Taxonomies.tags }}
+            <li><a href="{{ "/tags/" | relLangURL }}{{ $name | urlize }}">{{ $name }} ({{ len $taxonomy }})</a></li>
+        {{ end }}
+    </ul>
+</div>
+
+<ul class="changesets-listing">
+    {{ $paginator := .Paginate (where .Site.RegularPages "Section" "changesets") 15 }}
+    {{ range $paginator.Pages }}
+    <li class="changeset">
+        <div class="changeset-id">
+            <a href="{{ .RelPermalink }}">{{ .Params.id }}</a>
+        </div>
+    </li>
+    {{ end }}
+</ul>
+
+<div class="pagination">
+    {{ template "_internal/pagination.html" . }}
+</div>
+
+{{ end }}
+
+{{ define "footer" }}
+<script src="https://unpkg.com/lunr/lunr.min.js"></script>
+<script src="/js/script.js"></script>
+{{ end }}

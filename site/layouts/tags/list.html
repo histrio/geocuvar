@@ -1,0 +1,17 @@
+{{ define "main" }}
+<div class="tags-page">
+    <h1>{{ .Title }}</h1>
+    <ul class="changeset-listing">
+        {{ range .Paginator.Pages }}
+        <li class="changeset">
+            <div class="changeset-name">
+            <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+            </div>
+        </li>
+        {{ end }}
+    </ul>
+    <div class="pagination">
+        {{ template "_internal/pagination.html" . }}
+    </div>
+</div>
+{{ end }}

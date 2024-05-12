@@ -1,0 +1,25 @@
+{{ define "title" }}{{ i18n "siteTitle" }} | {{ .Title }}{{ end }}
+{{ define "main" }}
+<article class="article-content">
+    <h1>Changeset ID: {{ .Params.id }}</h1>
+    <div class="meta">
+        <p>Created: {{ .PublishDate }}</p>
+    </div>
+    <section>
+        User <a href="https://www.openstreetmap.org/user/{{ .Params.user }}">{{ .Params.user }}</a> 
+        has uploaded a <a href="https://www.openstreetmap.org/browse/changeset/{{ .Params.id }}">changeset</a> in your watched area 
+        using {{ .Params.created_by}}, titled "{{ .Params.comment }}". 
+        <a href="https://simon04.dev.openstreetmap.org/whodidit/?changeset={{ .Params.id }}&show=1">Show it on WhoDidIt.</a>
+        <a href="https://nrenner.github.io/achavi/?changeset={{ .Params.id }}">Show it on Achavi.</a>
+        <a href="https://osmcha.org/{{ .Params.id }}">Show it on OSMChA.</a>
+        <div class="offer" style="visibility: hidden;">
+            Statistics:
+            <ul>
+                <li>Nodes: 224 created, 0 modified, 0 deleted</li>
+                <li>Ways: 56 created, 0 modified, 0 deleted</li>
+                <li>Relations: 0 created, 0 modified, 0 deleted</li>
+            </ul>
+        </div>
+    </section>
+</article>
+{{ end }}
