@@ -1,3 +1,9 @@
 baseURL = 'https://geocuvar.pages.dev/'
 languageCode = 'en-us'
 title = 'GEOCHUVAR'
+
+[menus]
+  [[menus.footer]]
+    name = 'About'
+    pageRef = '/about'
+    weight = 10

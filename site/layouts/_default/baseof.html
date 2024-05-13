@@ -53,6 +53,12 @@
 {{ block "main" . }}{{ end }}
 
 
+<div class="footer">
+      {{ range .Site.Menus.footer }}
+      <a href="{{ .URL }}">{{ .Name }}</a>
+      {{ end }}
+</div>
+
 {{ block "footer" . }}{{ end }}
 
 </body>
