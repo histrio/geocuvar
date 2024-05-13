@@ -47,6 +47,7 @@ struct Changeset {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Content {
+    Title: String,
     PublishDate: String,
     id: u64,
     user: String,
@@ -184,13 +185,19 @@ fn get_changesets(xml_data: &str) -> Result<Vec<String>> {
 async fn main() -> Result<()> {
     env_logger::init();
     let dir_path = get_home_folder().await?;
+
     let montenegro_bbox = BoundingBox::new(18.4500, 41.8500, 20.3500, 43.5500);
+    let budva_bbox = BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062);
+    let kotor_bbox = BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325); // Kotor bounding box
+    let cetinje_bbox = BoundingBox::new(18.9100, 42.3730, 18.9450, 42.3930); // Cetinje bounding box
+
     let remote_id = get_remote_latest_changeset_id().await?;
     let local_id = get_local_latest_changeset_id().await?;
     debug!("Remote ID: {}, Local ID: {}", remote_id, local_id);
 
     for id in local_id..remote_id {
-        debug!("Update sequence: {}", id);
+        info!("Processing changeset {} of {}", id - local_id + 1, remote_id - local_id + 1);
+
         let id_padded = format!("{:09}", id);
         let url = format!(
             "{}/minute/{}/{}/{}.osc.gz",
@@ -223,46 +230,65 @@ async fn main() -> Result<()> {
 
         for changeset in osm_data.changeset {
             debug!("Changeset: {:?}", changeset);
+            let comment = changeset
+                .tag
+                .as_ref()
+                .and_then(|tags| {
+                    tags.iter()
+                        .find(|tag| tag.k == "comment")
+                        .map(|tag| tag.v.clone())
+                })
+                .unwrap_or_else(|| "".to_string());
+            let created_by = changeset
+                .tag
+                .as_ref()
+                .and_then(|tags| {
+                    tags.iter()
+                        .find(|tag| tag.k == "created_by")
+                        .map(|tag| tag.v.clone())
+                })
+                .unwrap_or_else(|| "".to_string());
             let content = Content {
+                Title: format!("Changeset #{}", changeset.id),
                 PublishDate: changeset.created_at.clone(),
                 id: changeset.id,
                 user: changeset.user,
-                comment: changeset
-                    .tag
-                    .as_ref()
-                    .and_then(|tags| {
-                        tags.iter()
-                            .find(|tag| tag.k == "comment")
-                            .map(|tag| tag.v.clone())
-                    })
-                    .unwrap_or_else(|| "".to_string()),
-                created_by: changeset
-                    .tag
-                    .as_ref()
-                    .and_then(|tags| {
-                        tags.iter()
-                            .find(|tag| tag.k == "created_by")
-                            .map(|tag| tag.v.clone())
-                    })
-                    .unwrap_or_else(|| "".to_string()),
+                comment: comment,
+                created_by: created_by,
             };
             let yaml_string = serde_yaml::to_string(&content)?;
+
+            // New List of tags for a changeset
+            let mut tags: Vec<String> = Vec::new();
 
             if let Some(bbox) = changeset.bbox {
                 if bbox.intersects(&montenegro_bbox) {
                     info!("Changeset intersects Montenegro: {:?}", content);
-                    let file_path = dir_path
-                        .join("content")
-                        .join("changesets")
-                        .join(format!("{}.md", changeset.id));
-                    let file_content = format!("{}\n---\n", yaml_string);
-
-                    fs::write(&file_path, file_content)
-                        .await
-                        .context("Failed to write changeset file")?;
+                    tags.push("Montenegro".to_string());
                 }
-            } else {
-                debug!("Changeset has no bbox");
+                if bbox.intersects(&budva_bbox) {
+                    info!("Changeset intersects Budva: {:?}", content);
+                    tags.push("Budva".to_string());
+                }
+                if bbox.intersects(&kotor_bbox) {
+                    info!("Changeset intersects Kotor: {:?}", content);
+                    tags.push("Kotor".to_string());
+                }
+                if bbox.intersects(&cetinje_bbox) {
+                    info!("Changeset intersects Cetinje: {:?}", content);
+                    tags.push("Cetinje".to_string());
+                }
+            }
+            if !tags.is_empty() {
+                let file_path = dir_path
+                    .join("content")
+                    .join("changesets")
+                    .join(format!("{}.md", changeset.id));
+                let file_content = format!("{}\n---\n", yaml_string);
+
+                fs::write(&file_path, file_content)
+                    .await
+                    .context("Failed to write changeset file")?;
             }
         }
 
