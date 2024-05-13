@@ -1,4 +1,4 @@
-{{ define "title" }} Map Changes | Home {{ end }}
+{{ define "title" }} GeoCuvar | Home {{ end }}
 {{ define "main" }}
 
 <div class="tags-list">
@@ -14,7 +14,7 @@
     {{ range $paginator.Pages }}
     <li class="changeset">
         <div class="changeset-id">
-            <a href="{{ .RelPermalink }}">{{ .Params.id }}</a>
+            <a href="{{ .RelPermalink }}">{{ .Title }}</a>
         </div>
     </li>
     {{ end }}
