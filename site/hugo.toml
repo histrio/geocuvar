@@ -1,6 +1,6 @@
 baseURL = 'https://geocuvar.pages.dev/'
 languageCode = 'en-us'
-title = 'GEOCHUVAR'
+title = 'GEOCUVAR'
 
 [menus]
   [[menus.footer]]
