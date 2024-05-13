@@ -53,6 +53,7 @@ struct Content {
     user: String,
     comment: String,
     created_by: String,
+    tags: Vec<String>
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -230,56 +231,56 @@ async fn main() -> Result<()> {
 
         for changeset in osm_data.changeset {
             debug!("Changeset: {:?}", changeset);
-            let comment = changeset
-                .tag
-                .as_ref()
-                .and_then(|tags| {
-                    tags.iter()
-                        .find(|tag| tag.k == "comment")
-                        .map(|tag| tag.v.clone())
-                })
-                .unwrap_or_else(|| "".to_string());
-            let created_by = changeset
-                .tag
-                .as_ref()
-                .and_then(|tags| {
-                    tags.iter()
-                        .find(|tag| tag.k == "created_by")
-                        .map(|tag| tag.v.clone())
-                })
-                .unwrap_or_else(|| "".to_string());
-            let content = Content {
-                Title: format!("Changeset #{}", changeset.id),
-                PublishDate: changeset.created_at.clone(),
-                id: changeset.id,
-                user: changeset.user,
-                comment: comment,
-                created_by: created_by,
-            };
-            let yaml_string = serde_yaml::to_string(&content)?;
 
             // New List of tags for a changeset
             let mut tags: Vec<String> = Vec::new();
-
             if let Some(bbox) = changeset.bbox {
                 if bbox.intersects(&montenegro_bbox) {
-                    info!("Changeset intersects Montenegro: {:?}", content);
+                    info!("Changeset intersects Montenegro: {:?}", changeset.id);
                     tags.push("Montenegro".to_string());
                 }
                 if bbox.intersects(&budva_bbox) {
-                    info!("Changeset intersects Budva: {:?}", content);
+                    info!("Changeset intersects Budva: {:?}", changeset.id);
                     tags.push("Budva".to_string());
                 }
                 if bbox.intersects(&kotor_bbox) {
-                    info!("Changeset intersects Kotor: {:?}", content);
+                    info!("Changeset intersects Kotor: {:?}", changeset.id);
                     tags.push("Kotor".to_string());
                 }
                 if bbox.intersects(&cetinje_bbox) {
-                    info!("Changeset intersects Cetinje: {:?}", content);
+                    info!("Changeset intersects Cetinje: {:?}", changeset.id);
                     tags.push("Cetinje".to_string());
                 }
             }
             if !tags.is_empty() {
+                let comment = changeset
+                    .tag
+                    .as_ref()
+                    .and_then(|tags| {
+                        tags.iter()
+                            .find(|tag| tag.k == "comment")
+                            .map(|tag| tag.v.clone())
+                    })
+                    .unwrap_or_else(|| "".to_string());
+                let created_by = changeset
+                    .tag
+                    .as_ref()
+                    .and_then(|tags| {
+                        tags.iter()
+                            .find(|tag| tag.k == "created_by")
+                            .map(|tag| tag.v.clone())
+                    })
+                    .unwrap_or_else(|| "".to_string());
+                let content = Content {
+                    Title: format!("Changeset #{}", changeset.id),
+                    PublishDate: changeset.created_at.clone(),
+                    id: changeset.id,
+                    user: changeset.user,
+                    comment: comment,
+                    created_by: created_by,
+                    tags: tags
+                };
+                let yaml_string = serde_yaml::to_string(&content)?;
                 let file_path = dir_path
                     .join("content")
                     .join("changesets")
@@ -292,6 +293,7 @@ async fn main() -> Result<()> {
             }
         }
 
+        // Sleep for a second to avoid rate limiting
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         write_local_latest_changeset_id(id).await?;
     }
