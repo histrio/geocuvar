@@ -1,2 +1,3 @@
 /target
 site/public
+.hugo_build.lock
