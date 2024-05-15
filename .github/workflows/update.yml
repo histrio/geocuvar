@@ -1,0 +1,65 @@
+name: Update content
+
+on:
+  schedule:
+    - cron: '0 7,12,17 * * *' # Runs at 7:00 AM 12:00 AM and 5:00 PM every day
+  workflow_dispatch: # This line enables manual triggering of the workflow
+
+
+permissions:
+  contents: write
+
+jobs:
+    update:
+      runs-on: ubuntu-latest
+
+      steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-index-
+
+      - name: Cache build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-build-
+
+      - name: Build Rust application
+        run: cargo build --release
+
+      - name: Run Rust application
+        run: ./target/release/geocuvar
+
+      - name: Github commit
+        run: |
+          git config --global user.email "me@false.org.ru"
+          git config --global user.name "Rinat Sabitov"
+
+      - name: Commit update
+        run: |
+          git add -A
+          git commit -m "Content update automated commit by GitHub Actions " -a || echo "No changes to commit"
+
+      - name: Push
+        run: |
+          git push
