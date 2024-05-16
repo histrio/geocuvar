@@ -14,3 +14,7 @@ quick-xml = { version = "0.31", features = ["serialize"] }
 serde-xml-rs = "0.5.1"
 flate2 = "1.0.30"
 serde_yaml = "0.8"
+
+
+[taxonomies]
+  tag = "tags"

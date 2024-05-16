@@ -1,7 +1,8 @@
+
 {{ define "main" }}
 <section>
-    <h2>Recent Changesets</h2>
-    {{ $paginator := .Paginate (where .Site.RegularPages "Section" "changesets") }}
+    <h2>Changesets in {{ .Title }}</h2>
+    {{ $paginator := .Paginate (where .Site.RegularPages "Params.tags" "intersect" (slice .Title)) }}
     <ul class="changeset-list">
         {{ range $paginator.Pages }}
             <li>
@@ -39,14 +40,5 @@
             <a href="{{ $paginator.Last.URL }}">Last</a>
         {{ end }}
     </div>
-</section>
-
-<section>
-    <h2>Regions</h2>
-    <ul class="tag-list">
-        {{ range $name, $taxonomy := .Site.Taxonomies.tags }}
-            <li><a href="{{ "tags/" | relLangURL }}{{ $name | urlize }}">{{ $name }} ({{ $taxonomy.Count }})</a></li>
-        {{ end }}
-    </ul>
 </section>
 {{ end }}
