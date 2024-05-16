@@ -14,7 +14,7 @@
     {{ range $paginator.Pages }}
     <li class="changeset">
         <div class="changeset-id">
-            <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+            {{ .Date | time.Format ":date_medium" }} <a href="{{ .RelPermalink }}">{{ .Title }}: {{ .Params.comment | truncate 45 }}</a>
         </div>
     </li>
     {{ end }}

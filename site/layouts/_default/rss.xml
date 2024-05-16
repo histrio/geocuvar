@@ -27,7 +27,7 @@
     {{- end }}
     {{- range $pages }}
     <item>
-      <title>{{ .Title }}</title>
+      <title>{{ .Title }}: {{ .Params.comment }}</title>
       <link>{{ .Permalink }}</link>
       <pubDate>{{ .PublishDate.Format "Mon, 02 Jan 2006 15:04:05 -0700" | safeHTML }}</pubDate>
       <author>{{ .Params.user }}</author>
@@ -36,8 +36,6 @@
         User <a href="https://www.openstreetmap.org/user/{{ .Params.user }}">{{ .Params.user }}</a> 
         has uploaded a <a href="https://www.openstreetmap.org/browse/changeset/{{ .Params.id }}">changeset</a> in your watched area 
         using {{ .Params.created_by}}, titled "{{ .Params.comment }}". 
-        <a href="https://nrenner.github.io/achavi/?changeset={{ .Params.id }}">Show it on Achavi.</a>
-        <a href="https://osmcha.org/{{ .Params.id }}">Show it on OSMChA.</a>
       </description>
     </item>
     {{- end }}
