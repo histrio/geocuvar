@@ -1,7 +1,5 @@
 use anyhow::{Context, Result};
 use log::{debug, info};
-use quick_xml::events::Event;
-use quick_xml::Reader;
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_xml_rs::from_str;
@@ -9,6 +7,7 @@ use std::collections::HashSet;
 use std::io::Read;
 use std::path::PathBuf;
 use tokio::fs;
+use xml::reader::{EventReader, XmlEvent};
 
 fn deserialize_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
@@ -47,8 +46,10 @@ struct Changeset {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Content {
-    Title: String,
-    PublishDate: String,
+    #[serde(rename = "Title")]
+    title: String,
+    #[serde(rename = "PublishDate")]
+    publish_date: String,
     id: u64,
     user: String,
     comment: String,
@@ -152,33 +153,27 @@ async fn write_local_latest_changeset_id(id: i32) -> Result<()> {
 }
 
 fn get_changesets(xml_data: &str) -> Result<Vec<String>> {
-    let mut reader = Reader::from_str(xml_data);
-    reader.trim_text(true);
+    let parser = EventReader::from_str(xml_data);
     let mut unique_values = HashSet::new();
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                for attr in e.attributes().filter_map(Result::ok) {
-                    if attr.key.as_ref() == b"changeset" {
-                        let value = attr
-                            .unescape_value()
-                            .context("Failed to decode attribute value")?
-                            .to_string();
+
+    for e in parser {
+        match e {
+            Ok(XmlEvent::StartElement { attributes, .. }) => {
+                for attr in attributes {
+                    if attr.name.local_name == "changeset" {
+                        let value = attr.value.clone();
                         unique_values.insert(value);
                     }
                 }
             }
-            Ok(Event::Eof) => break,
+            Ok(XmlEvent::EndDocument) => break,
             Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "XML parsing error at position {}: {}",
-                    reader.buffer_position(),
-                    e
-                ))
+                return Err(anyhow::anyhow!("XML parsing error: {}", e));
             }
             _ => (),
         }
     }
+
     Ok(unique_values.into_iter().collect())
 }
 
@@ -281,8 +276,8 @@ async fn main() -> Result<()> {
                     })
                     .unwrap_or_else(|| "".to_string());
                 let content = Content {
-                    Title: format!("Changeset #{}", changeset.id),
-                    PublishDate: changeset.created_at.clone(),
+                    title: format!("Changeset #{}", changeset.id),
+                    publish_date: changeset.created_at.clone(),
                     id: changeset.id,
                     user: changeset.user,
                     comment: comment,
