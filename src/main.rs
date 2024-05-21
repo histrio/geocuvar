@@ -182,14 +182,37 @@ async fn main() -> Result<()> {
     env_logger::init();
     let dir_path = get_home_folder().await?;
 
-    let montenegro_bbox = BoundingBox::new(18.4500, 41.8500, 20.3500, 43.5500);
-    let budva_bbox = BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062);
-    let kotor_bbox = BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325); // Kotor bounding box
-    let cetinje_bbox = BoundingBox::new(18.9100, 42.3730, 18.9450, 42.3930); // Cetinje bounding box
-    let tivat_bbox = BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350); // Tivat bounding box
-    let bar_bbox = BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300); // Bar bounding box
-    let podgorica_bbox = BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100); // Podgorica bounding box
-    let niksic_bbox = BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000); // Nikšić bounding box
+    let bounding_boxes = vec![
+        (
+            "Montenegro",
+            BoundingBox::new(18.4500, 41.8500, 20.3500, 43.5500),
+        ),
+        (
+            "Budva",
+            BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062),
+        ),
+        (
+            "Kotor",
+            BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325),
+        ),
+        (
+            "Cetinje",
+            BoundingBox::new(18.9100, 42.3730, 18.9450, 42.3930),
+        ),
+        (
+            "Tivat",
+            BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
+        ),
+        ("Bar", BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
+        (
+            "Podgorica",
+            BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100),
+        ),
+        (
+            "Nikšić",
+            BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000),
+        ),
+    ];
 
     let remote_id = get_remote_latest_changeset_id().await?;
     let local_id = get_local_latest_changeset_id().await?;
@@ -211,6 +234,7 @@ async fn main() -> Result<()> {
             &id_padded[6..9],
         );
         debug!("Update URL: {}", url);
+
         let response = reqwest::get(&url).await?;
         let body = response.bytes().await?;
         let mut decoder = flate2::read::GzDecoder::new(&body[..]);
@@ -219,6 +243,7 @@ async fn main() -> Result<()> {
 
         let changesets_list = get_changesets(&xml_data)?;
         debug!("Changesets: {:?}", changesets_list);
+
         let changesets_csv = changesets_list.join(",");
         let changesets_url = format!(
             "https://api.openstreetmap.org/api/0.6/changesets?changesets={}",
@@ -235,27 +260,16 @@ async fn main() -> Result<()> {
         for changeset in osm_data.changeset {
             debug!("Changeset: {:?}", changeset);
 
-            // New List of tags for a changeset
             let mut tags: Vec<String> = Vec::new();
             if let Some(bbox) = changeset.bbox {
-                let bbox_tags = [
-                    ("Montenegro", &montenegro_bbox),
-                    ("Budva", &budva_bbox),
-                    ("Kotor", &kotor_bbox),
-                    ("Cetinje", &cetinje_bbox),
-                    ("Tivat", &tivat_bbox),
-                    ("Bar", &bar_bbox),
-                    ("Podgorica", &podgorica_bbox),
-                    ("Nikšić", &niksic_bbox),
-                ];
-
-                for (tag, region_bbox) in &bbox_tags {
+                for (tag, region_bbox) in &bounding_boxes {
                     if bbox.intersects(region_bbox) {
                         info!("Changeset intersects {}: {:?}", tag, changeset.id);
                         tags.push(tag.to_string());
                     }
                 }
             }
+
             if !tags.is_empty() {
                 let comment = changeset
                     .tag
@@ -266,6 +280,7 @@ async fn main() -> Result<()> {
                             .map(|tag| tag.v.clone())
                     })
                     .unwrap_or_else(|| "".to_string());
+
                 let created_by = changeset
                     .tag
                     .as_ref()
@@ -275,15 +290,17 @@ async fn main() -> Result<()> {
                             .map(|tag| tag.v.clone())
                     })
                     .unwrap_or_else(|| "".to_string());
+
                 let content = Content {
                     title: format!("Changeset #{}", changeset.id),
                     publish_date: changeset.created_at.clone(),
                     id: changeset.id,
                     user: changeset.user,
-                    comment: comment,
-                    created_by: created_by,
-                    tags: tags,
+                    comment,
+                    created_by,
+                    tags,
                 };
+
                 let yaml_string = serde_yaml::to_string(&content)?;
                 let file_path = dir_path
                     .join("content")
@@ -297,7 +314,6 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Sleep for a second to avoid rate limiting
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         write_local_latest_changeset_id(id).await?;
     }
