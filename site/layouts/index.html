@@ -1,5 +1,13 @@
 {{ define "main" }}
 <section>
+    <section>
+        <h2>Regions</h2>
+        <ul class="tag-list">
+            {{ range $name, $taxonomy := .Site.Taxonomies.tags }}
+                <li><a href="{{ "tags/" | relLangURL }}{{ $name | urlize }}">{{ $name }}</a></li>
+            {{ end }}
+        </ul>
+    </section>
     <h2>Recent Changesets</h2>
     {{ $paginator := .Paginate (where .Site.RegularPages "Section" "changesets") }}
     <ul class="changeset-list">
@@ -41,12 +49,4 @@
     </div>
 </section>
 
-<section>
-    <h2>Regions</h2>
-    <ul class="tag-list">
-        {{ range $name, $taxonomy := .Site.Taxonomies.tags }}
-            <li><a href="{{ "tags/" | relLangURL }}{{ $name | urlize }}">{{ $name }} ({{ $taxonomy.Count }})</a></li>
-        {{ end }}
-    </ul>
-</section>
 {{ end }}
