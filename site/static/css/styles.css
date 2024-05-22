@@ -112,3 +112,13 @@ footer nav a:hover {
 .tag-list li a:hover {
     text-decoration: underline;
 }
+
+h1 a {
+    text-decoration: none;
+    color: inherit; /* This makes the link take the color of the parent element (h1) */
+}
+
+h1 a:hover, h1 a:focus {
+    text-decoration: none; /* This ensures there is no underline on hover or focus */
+    color: inherit; /* Keeps the color unchanged on hover or focus */
+}

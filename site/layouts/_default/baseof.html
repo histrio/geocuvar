@@ -8,7 +8,7 @@
 </head>
 <body>
     <header>
-        <h1>{{ .Site.Title }}</h1>
+        <h1><a href="/">{{ .Site.Title }}</a></h1>
     </header>
     <main>
         {{ block "main" . }}
@@ -16,7 +16,6 @@
     </main>
     <footer>
         <nav>
-            <a href="/">Home</a> |
             <a href="/about/">About</a> |
             <a href="/contact/">Contact</a>
         </nav>
