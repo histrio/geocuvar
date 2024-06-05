@@ -8,6 +8,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use tokio::fs;
 use xml::reader::{EventReader, XmlEvent};
+use std::ffi::OsStr;
 
 fn deserialize_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
@@ -317,6 +318,26 @@ async fn main() -> Result<()> {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         write_local_latest_changeset_id(id).await?;
     }
+
+    // Get files older than 1 year and remove them
+    let one_year_ago = chrono::Utc::now() - chrono::Duration::days(365);
+
+    // iter over dir *.md files and remove those older than one year
+    let mut iter_files = fs::read_dir(dir_path.join("content").join("changesets")).await?;
+    while let Some(entry_result) = iter_files.next_entry().await? {
+        let entry = entry_result;
+
+        if entry.path().extension().and_then(OsStr::to_str) == Some("md") {
+            let metadata = entry.metadata().await?;
+            if let Ok(modified) = metadata.modified() {
+                if modified < one_year_ago.into() {
+                    fs::remove_file(entry.path()).await?;
+                }
+            }
+        }
+    }
+
+
 
     Ok(())
 }
