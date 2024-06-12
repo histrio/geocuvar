@@ -307,7 +307,7 @@ async fn main() -> Result<()> {
                     .join("content")
                     .join("changesets")
                     .join(format!("{}.md", changeset.id));
-                let file_content = format!("{}\n---\n", yaml_string);
+                let file_content = format!("---\n{}\n---\n", yaml_string);
 
                 fs::write(&file_path, file_content)
                     .await
