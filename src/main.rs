@@ -4,11 +4,11 @@ use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_xml_rs::from_str;
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::io::Read;
 use std::path::PathBuf;
 use tokio::fs;
 use xml::reader::{EventReader, XmlEvent};
-use std::ffi::OsStr;
 
 fn deserialize_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
@@ -245,73 +245,80 @@ async fn main() -> Result<()> {
         let changesets_list = get_changesets(&xml_data)?;
         debug!("Changesets: {:?}", changesets_list);
 
-        let changesets_csv = changesets_list.join(",");
-        let changesets_url = format!(
-            "https://api.openstreetmap.org/api/0.6/changesets?changesets={}",
-            changesets_csv
-        );
+        // Get changesets as chunks size of 20 and iter over it
+        // to avoid 414 Request-URI Too Large
 
-        let response = reqwest::get(&changesets_url).await?;
-        let body = response.text().await?;
-        debug!("XML: {}", body);
+        let chunks = changesets_list.chunks(20);
 
-        let osm_data: Osm = from_str(&body)?;
-        debug!("Changesets: {:?}", osm_data);
+        for _changesets_list in chunks {
+            let changesets_csv = _changesets_list.join(",");
+            let changesets_url = format!(
+                "https://api.openstreetmap.org/api/0.6/changesets?changesets={}",
+                changesets_csv
+            );
 
-        for changeset in osm_data.changeset {
-            debug!("Changeset: {:?}", changeset);
+            let response = reqwest::get(&changesets_url).await?;
+            let body = response.text().await?;
+            debug!("XML: {}", body);
 
-            let mut tags: Vec<String> = Vec::new();
-            if let Some(bbox) = changeset.bbox {
-                for (tag, region_bbox) in &bounding_boxes {
-                    if bbox.intersects(region_bbox) {
-                        info!("Changeset intersects {}: {:?}", tag, changeset.id);
-                        tags.push(tag.to_string());
+            let osm_data: Osm = from_str(&body)?;
+            debug!("Changesets: {:?}", osm_data);
+
+            for changeset in osm_data.changeset {
+                debug!("Changeset: {:?}", changeset);
+
+                let mut tags: Vec<String> = Vec::new();
+                if let Some(bbox) = changeset.bbox {
+                    for (tag, region_bbox) in &bounding_boxes {
+                        if bbox.intersects(region_bbox) {
+                            info!("Changeset intersects {}: {:?}", tag, changeset.id);
+                            tags.push(tag.to_string());
+                        }
                     }
                 }
-            }
 
-            if !tags.is_empty() {
-                let comment = changeset
-                    .tag
-                    .as_ref()
-                    .and_then(|tags| {
-                        tags.iter()
-                            .find(|tag| tag.k == "comment")
-                            .map(|tag| tag.v.clone())
-                    })
-                    .unwrap_or_else(|| "".to_string());
+                if !tags.is_empty() {
+                    let comment = changeset
+                        .tag
+                        .as_ref()
+                        .and_then(|tags| {
+                            tags.iter()
+                                .find(|tag| tag.k == "comment")
+                                .map(|tag| tag.v.clone())
+                        })
+                        .unwrap_or_else(|| "".to_string());
 
-                let created_by = changeset
-                    .tag
-                    .as_ref()
-                    .and_then(|tags| {
-                        tags.iter()
-                            .find(|tag| tag.k == "created_by")
-                            .map(|tag| tag.v.clone())
-                    })
-                    .unwrap_or_else(|| "".to_string());
+                    let created_by = changeset
+                        .tag
+                        .as_ref()
+                        .and_then(|tags| {
+                            tags.iter()
+                                .find(|tag| tag.k == "created_by")
+                                .map(|tag| tag.v.clone())
+                        })
+                        .unwrap_or_else(|| "".to_string());
 
-                let content = Content {
-                    title: format!("Changeset #{}", changeset.id),
-                    publish_date: changeset.created_at.clone(),
-                    id: changeset.id,
-                    user: changeset.user,
-                    comment,
-                    created_by,
-                    tags,
-                };
+                    let content = Content {
+                        title: format!("Changeset #{}", changeset.id),
+                        publish_date: changeset.created_at.clone(),
+                        id: changeset.id,
+                        user: changeset.user,
+                        comment,
+                        created_by,
+                        tags,
+                    };
 
-                let yaml_string = serde_yaml::to_string(&content)?;
-                let file_path = dir_path
-                    .join("content")
-                    .join("changesets")
-                    .join(format!("{}.md", changeset.id));
-                let file_content = format!("---\n{}\n---\n", yaml_string);
+                    let yaml_string = serde_yaml::to_string(&content)?;
+                    let file_path = dir_path
+                        .join("content")
+                        .join("changesets")
+                        .join(format!("{}.md", changeset.id));
+                    let file_content = format!("---\n{}\n---\n", yaml_string);
 
-                fs::write(&file_path, file_content)
-                    .await
-                    .context("Failed to write changeset file")?;
+                    fs::write(&file_path, file_content)
+                        .await
+                        .context("Failed to write changeset file")?;
+                }
             }
         }
 
@@ -336,8 +343,6 @@ async fn main() -> Result<()> {
             }
         }
     }
-
-
 
     Ok(())
 }
