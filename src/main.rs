@@ -328,6 +328,7 @@ async fn main() -> Result<()> {
 
     // Get files older than 1 year and remove them
     let one_year_ago = chrono::Utc::now() - chrono::Duration::days(365);
+    info!("Removing files older than one year");
 
     // iter over dir *.md files and remove those older than one year
     let mut iter_files = fs::read_dir(dir_path.join("content").join("changesets")).await?;
@@ -338,6 +339,7 @@ async fn main() -> Result<()> {
             let metadata = entry.metadata().await?;
             if let Ok(modified) = metadata.modified() {
                 if modified < one_year_ago.into() {
+                    info!("Removing file: {:?}", entry.path());
                     fs::remove_file(entry.path()).await?;
                 }
             }
