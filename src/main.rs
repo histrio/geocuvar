@@ -10,6 +10,13 @@ use std::path::PathBuf;
 use tokio::fs;
 use xml::reader::{EventReader, XmlEvent};
 
+use geo::{Polygon};
+use geo::algorithm::intersects::Intersects;
+
+
+// Declare turbopass query as string alias 
+type TurbopassQuery = String;
+
 fn deserialize_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -75,6 +82,104 @@ struct Osm {
     changeset: Vec<Changeset>,
 }
 
+#[derive(Debug, Deserialize)]
+struct Overpass {
+    #[serde(rename = "version")]
+    version: String,
+    #[serde(rename = "generator")]
+    generator: String,
+    #[serde(rename = "meta")]
+    meta: Meta,
+    #[serde(rename = "item", default)]
+    items: Vec<Item>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Meta {
+    #[serde(rename = "osm_base")]
+    osm_base: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Item {
+    #[serde(rename = "id")]
+    id: u64,
+    #[serde(rename = "group", default)]
+    groups: Vec<Group>,
+    #[serde(rename = "tag", default)]
+    tags: Vec<OverpassTag>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Group {
+    #[serde(rename = "vertex", default)]
+    vertices: Vec<Vertex>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Vertex {
+    #[serde(rename = "lat")]
+    lat: f64,
+    #[serde(rename = "lon")]
+    lon: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct OverpassTag {
+    #[serde(rename = "k")]
+    key: String,
+    #[serde(rename = "v")]
+    value: String,
+}
+
+
+trait Boundaries {
+    fn intersects(&self, other: &BoundingBox) -> bool;
+}
+
+struct BoundingPolygon {
+    polygon: Polygon<f64>,
+}
+
+impl BoundingPolygon {
+    async fn new(query: TurbopassQuery) -> Result<Self> {
+        println!("Query: {}", query);
+        let turbopass_query_url = format!("https://overpass-api.de/api/interpreter?data={}", query);
+        let response = reqwest::get(&turbopass_query_url).await?;
+        let xml_data = response.text().await?;
+        let overpass: Overpass = from_str(&xml_data)?;
+
+        let mut points = Vec::new();
+        for item in overpass.items {
+            for group in item.groups {
+                for vertex in group.vertices {
+                    points.push((vertex.lon, vertex.lat));
+                }
+            }
+        }
+        let polygon = Polygon::new(points.into(), vec![]);
+        Ok(Self { polygon })
+    }
+
+}
+
+impl Boundaries for BoundingPolygon {
+    fn intersects(&self, other: &BoundingBox) -> bool {
+        let other_polygon = Polygon::new(
+            vec![
+                (other.min_lon, other.min_lat),
+                (other.min_lon, other.max_lat),
+                (other.max_lon, other.max_lat),
+                (other.max_lon, other.min_lat),
+                (other.min_lon, other.min_lat),
+            ]
+            .into(),
+            vec![],
+        );
+        self.polygon.intersects(&other_polygon)
+    }
+}
+
 impl BoundingBox {
     fn new(min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> Self {
         Self {
@@ -84,7 +189,10 @@ impl BoundingBox {
             max_lat,
         }
     }
+}
 
+
+impl Boundaries for BoundingBox {
     fn intersects(&self, other: &BoundingBox) -> bool {
         self.min_lon < other.max_lon
             && self.max_lon > other.min_lon
@@ -183,35 +291,49 @@ async fn main() -> Result<()> {
     env_logger::init();
     let dir_path = get_home_folder().await?;
 
-    let bounding_boxes = vec![
+    let bounding_boxes:Vec<(&str, Box<dyn Boundaries>)> = vec![
         (
             "Montenegro",
-            BoundingBox::new(18.4500, 41.8500, 20.3500, 43.5500),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Montenegro']['boundary'='administrative']; out geom;".to_string()).await?),
         ),
         (
             "Budva",
-            BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062),
+            //BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Budva']['boundary'='administrative']; out geom;".to_string()).await?),
         ),
         (
             "Kotor",
-            BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325),
+            //BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325),
+            Box::new(BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325)),
         ),
         (
             "Cetinje",
-            BoundingBox::new(18.9100, 42.3730, 18.9450, 42.3930),
+            //BoundingBox::new(18.9100, 42.3730, 18.9450, 42.3930),
+            Box::new(BoundingBox::new(18.9100, 42.3730, 18.9450, 42.3930)),
         ),
         (
             "Tivat",
-            BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
+            //BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
+            //Box::new(BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350)),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Tivat']['boundary'='administrative']; out geom;".to_string()).await?),
         ),
-        ("Bar", BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
+        (
+            "Bar", 
+            //BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
+            //Box::new(BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Bar']['boundary'='administrative']; out geom;".to_string()).await?),
+        ),
         (
             "Podgorica",
-            BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100),
+            //BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100),
+            //Box::new(BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100)),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Podgorica']['boundary'='administrative']; out geom;".to_string()).await?),
         ),
         (
             "Nikšić",
-            BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000),
+            //BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000),
+            //Box::new(BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000)),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Nikšić']['boundary'='administrative']; out geom;".to_string()).await?),
         ),
     ];
 
@@ -270,7 +392,7 @@ async fn main() -> Result<()> {
                 let mut tags: Vec<String> = Vec::new();
                 if let Some(bbox) = changeset.bbox {
                     for (tag, region_bbox) in &bounding_boxes {
-                        if bbox.intersects(region_bbox) {
+                        if region_bbox.intersects(&bbox) {
                             info!("Changeset intersects {}: {:?}", tag, changeset.id);
                             tags.push(tag.to_string());
                         }
