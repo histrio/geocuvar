@@ -10,8 +10,13 @@ use std::path::PathBuf;
 use tokio::fs;
 use xml::reader::{EventReader, XmlEvent};
 
+use geo::algorithm::contains::Contains;
 use geo::{Polygon};
-use geo::algorithm::intersects::Intersects;
+
+use geo::SimplifyVw;
+
+
+use tokio::io::AsyncWriteExt;
 
 
 // Declare turbopass query as string alias 
@@ -25,6 +30,11 @@ where
     let s: String = Deserialize::deserialize(deserializer)?;
     s.parse::<f64>().map_err(de::Error::custom)
 }
+
+
+
+// ------------------------------------------------------------------------------------------------
+
 
 #[derive(Default, Debug, Deserialize, Serialize)]
 struct BoundingBox {
@@ -82,101 +92,156 @@ struct Osm {
     changeset: Vec<Changeset>,
 }
 
+// ------------------------------------------------------------------------------------------------
+// Overpass API
+
+
 #[derive(Debug, Deserialize)]
-struct Overpass {
+pub struct Overpass {
     #[serde(rename = "version")]
-    version: String,
+    pub version: String,
     #[serde(rename = "generator")]
-    generator: String,
+    pub generator: String,
+    #[serde(rename = "note")]
+    pub note: Option<String>,
     #[serde(rename = "meta")]
-    meta: Meta,
-    #[serde(rename = "item", default)]
-    items: Vec<Item>,
+    pub meta: Meta,
+    #[serde(rename = "way")]
+    pub ways: Vec<Way>, // Handle multiple <relation> elements
 }
 
 #[derive(Debug, Deserialize)]
-struct Meta {
-    #[serde(rename = "osm_base")]
-    osm_base: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct Item {
+pub struct Way {
     #[serde(rename = "id")]
-    id: u64,
-    #[serde(rename = "group", default)]
-    groups: Vec<Group>,
-    #[serde(rename = "tag", default)]
-    tags: Vec<OverpassTag>,
+    pub id: i64,
+    #[serde(rename = "bounds")]
+    pub bounds: Option<Bounds>,
+    #[serde(rename = "nd")]
+    pub nodes: Vec<Node>, // Multiple nodes
 }
 
 #[derive(Debug, Deserialize)]
-struct Group {
-    #[serde(rename = "vertex", default)]
-    vertices: Vec<Vertex>,
+pub struct OverpassTag {
+    #[serde(rename = "k")]
+    pub k: String,
+    #[serde(rename = "v")]
+    pub v: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct Vertex {
-    #[serde(rename = "lat")]
+pub struct Node {
+    #[serde(rename = "ref")]
+    pub ref_id: i64,
     lat: f64,
-    #[serde(rename = "lon")]
     lon: f64,
 }
 
 #[derive(Debug, Deserialize)]
-struct OverpassTag {
-    #[serde(rename = "k")]
-    key: String,
-    #[serde(rename = "v")]
-    value: String,
+pub struct Bounds {
+    minlat: f64,
+    minlon: f64,
+    maxlat: f64,
+    maxlon: f64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Meta {
+    #[serde(rename = "osm_base")]
+    pub osm_base: String,
+}
+
+
+
+// ------------------------------------------------------------------------------------------------
 
 trait Boundaries {
     fn intersects(&self, other: &BoundingBox) -> bool;
 }
 
 struct BoundingPolygon {
-    polygon: Polygon<f64>,
+    polygon: Polygon
 }
 
 impl BoundingPolygon {
     async fn new(query: TurbopassQuery) -> Result<Self> {
-        println!("Query: {}", query);
+        info!("Calculating bounding polygon for query: {}", query);
         let turbopass_query_url = format!("https://overpass-api.de/api/interpreter?data={}", query);
         let response = reqwest::get(&turbopass_query_url).await?;
         let xml_data = response.text().await?;
         let overpass: Overpass = from_str(&xml_data)?;
 
-        let mut points = Vec::new();
-        for item in overpass.items {
-            for group in item.groups {
-                for vertex in group.vertices {
-                    points.push((vertex.lon, vertex.lat));
+        let mut polygon_points = vec![];
+        // pop first way as current way
+        let mut current_way = &overpass.ways[0];
+        let mut reverse = false;
+        let mut processed_ways = vec![];
+        loop {
+            if processed_ways.contains(&current_way.id) {
+                break;
+            }
+            processed_ways.push(current_way.id);
+            if reverse {
+                for node in current_way.nodes.iter().rev() {
+                    polygon_points.push((node.lon, node.lat));
+                }
+            } else {
+                for node in current_way.nodes.iter() {
+                    polygon_points.push((node.lon, node.lat));
+                }
+            }
+
+            let last_node: &Node;
+            if reverse {
+                last_node = current_way.nodes.first().unwrap();
+            } else {
+                last_node = current_way.nodes.last().unwrap();
+            }
+
+            // find next way
+            if let Some(next_way) = overpass.ways.iter().find(|way| way.nodes.first().unwrap().ref_id == last_node.ref_id && way.id != current_way.id) {
+                reverse = false;
+                current_way = next_way;
+            } else {
+                if let Some(next_way) = overpass.ways.iter().find(|way| way.nodes.last().unwrap().ref_id == last_node.ref_id && way.id != current_way.id) {
+                    reverse = true;
+                    current_way = next_way;
+                } else {
+                    panic!("no next way found");
                 }
             }
         }
-        let polygon = Polygon::new(points.into(), vec![]);
-        Ok(Self { polygon })
+        //dump polygon_points to file in blocking manner without file
+        //fs::write("polygon_points.txt", format!("{:?}", polygon_points)).await?;
+
+        let polygon = Polygon::new(polygon_points.into(), vec![]);
+        //check winding order
+
+        //Simplify the polygon
+        let simplified_polygon = polygon.simplify_vw(&0.0001);
+
+        Ok(Self { polygon: simplified_polygon })
+
+
     }
 
 }
 
 impl Boundaries for BoundingPolygon {
     fn intersects(&self, other: &BoundingBox) -> bool {
-        let other_polygon = Polygon::new(
-            vec![
-                (other.min_lon, other.min_lat),
-                (other.min_lon, other.max_lat),
-                (other.max_lon, other.max_lat),
-                (other.max_lon, other.min_lat),
-                (other.min_lon, other.min_lat),
-            ]
-            .into(),
-            vec![],
-        );
-        self.polygon.intersects(&other_polygon)
+        // in some cases it cound be a point when coords are the same
+        if other.min_lon == other.max_lon && other.min_lat == other.max_lat {
+            return self.polygon.contains(&geo::Point::new(other.min_lon, other.min_lat));
+        }
+        // counterclockwise order for the exterior ring
+        let other_polygon_points = vec![
+            (other.min_lon, other.min_lat), // Bottom-left
+            (other.max_lon, other.min_lat), // Bottom-right
+            (other.max_lon, other.max_lat), // Top-right
+            (other.min_lon, other.max_lat), // Top-left
+            (other.min_lon, other.min_lat), // Close the loop (back to bottom-left)
+        ];
+        let other_polygon = Polygon::new(other_polygon_points.into(), vec![]);
+        self.polygon.contains(&other_polygon)
     }
 }
 
@@ -286,22 +351,23 @@ fn get_changesets(xml_data: &str) -> Result<Vec<String>> {
     Ok(unique_values.into_iter().collect())
 }
 
+
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
     let dir_path = get_home_folder().await?;
 
     let bounding_boxes:Vec<(&str, Box<dyn Boundaries>)> = vec![
-        (
+        /* (
             "Montenegro",
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Montenegro']['boundary'='administrative']; out geom;".to_string()).await?),
-        ),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Montenegro']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
+        ), */
         (
             "Budva",
             //BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062),
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Budva']['boundary'='administrative']; out geom;".to_string()).await?),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Budva']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
         ),
-        (
+        /* (
             "Kotor",
             //BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325),
             Box::new(BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325)),
@@ -315,26 +381,26 @@ async fn main() -> Result<()> {
             "Tivat",
             //BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
             //Box::new(BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350)),
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Tivat']['boundary'='administrative']; out geom;".to_string()).await?),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Tivat']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
         ),
         (
             "Bar", 
             //BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
             //Box::new(BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Bar']['boundary'='administrative']; out geom;".to_string()).await?),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Bar']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
         ),
         (
             "Podgorica",
             //BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100),
             //Box::new(BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100)),
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Podgorica']['boundary'='administrative']; out geom;".to_string()).await?),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Podgorica']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
         ),
         (
             "Nikšić",
             //BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000),
             //Box::new(BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000)),
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Nikšić']['boundary'='administrative']; out geom;".to_string()).await?),
-        ),
+            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Nikšić']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
+        ), */
     ];
 
     let remote_id = get_remote_latest_changeset_id().await?;
