@@ -165,7 +165,8 @@ struct BoundingPolygon {
 impl BoundingPolygon {
     async fn new(query: TurbopassQuery) -> Result<Self> {
         info!("Calculating bounding polygon for query: {}", query);
-        let turbopass_query_url = format!("https://overpass-api.de/api/interpreter?data={}", query);
+        let turbopass_query = format!("[out:xml]; {}; out geom;", query);
+        let turbopass_query_url = format!("https://overpass-api.de/api/interpreter?data={}", turbopass_query);
         let response = reqwest::get(&turbopass_query_url).await?;
         let xml_data = response.text().await?;
         let overpass: Overpass = from_str(&xml_data)?;
@@ -206,19 +207,16 @@ impl BoundingPolygon {
                     reverse = true;
                     current_way = next_way;
                 } else {
+                    let ways_count = overpass.ways.len();
+                    if ways_count == processed_ways.len() {
+                        break;
+                    }
                     panic!("no next way found");
                 }
             }
         }
-        //dump polygon_points to file in blocking manner without file
-        //fs::write("polygon_points.txt", format!("{:?}", polygon_points)).await?;
-
         let polygon = Polygon::new(polygon_points.into(), vec![]);
-        //check winding order
-
-        //Simplify the polygon
         let simplified_polygon = polygon.simplify_vw(&0.0001);
-
         Ok(Self { polygon: simplified_polygon })
 
 
@@ -360,46 +358,46 @@ async fn main() -> Result<()> {
     let bounding_boxes:Vec<(&str, Box<dyn Boundaries>)> = vec![
         (
             "Montenegro",
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Montenegro']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
+            Box::new(BoundingPolygon::new("relation['name'='Montenegro']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
             "Budva",
             //BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062),
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Budva']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
+            Box::new(BoundingPolygon::new("relation['name'='Budva']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
             "Kotor",
             //BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325),
-            Box::new(BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325)),
+            Box::new(BoundingPolygon::new("way['name'='Kotor']['place'='town']".to_string()).await?),
         ),
         (
             "Cetinje",
             //BoundingBox::new(18.9100, 42.3730, 18.9450, 42.3930),
-            Box::new(BoundingBox::new(18.9100, 42.3730, 18.9450, 42.3930)),
+            Box::new(BoundingPolygon::new("way['name'='Cetinje']['place'='town']".to_string()).await?),
+        ),
+        (
+            "Cetinje+",
+            Box::new(BoundingPolygon::new("relation['name'='Prijestolnica Cetinje']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
             "Tivat",
             //BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
-            //Box::new(BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350)),
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Tivat']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
+            Box::new(BoundingPolygon::new("relation['name'='Tivat']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
             "Bar", 
             //BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
-            //Box::new(BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Bar']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
+            Box::new(BoundingPolygon::new("relation['name'='Bar']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
             "Podgorica",
             //BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100),
-            //Box::new(BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100)),
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Podgorica']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
+            Box::new(BoundingPolygon::new("relation['name'='Podgorica']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
             "Nikšić",
             //BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000),
-            //Box::new(BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000)),
-            Box::new(BoundingPolygon::new("[out:xml];relation['name'='Nikšić']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
+            Box::new(BoundingPolygon::new("relation['name'='Nikšić']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
     ];
 
