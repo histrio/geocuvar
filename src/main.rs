@@ -358,16 +358,16 @@ async fn main() -> Result<()> {
     let dir_path = get_home_folder().await?;
 
     let bounding_boxes:Vec<(&str, Box<dyn Boundaries>)> = vec![
-        /* (
+        (
             "Montenegro",
             Box::new(BoundingPolygon::new("[out:xml];relation['name'='Montenegro']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
-        ), */
+        ),
         (
             "Budva",
             //BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062),
             Box::new(BoundingPolygon::new("[out:xml];relation['name'='Budva']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
         ),
-        /* (
+        (
             "Kotor",
             //BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325),
             Box::new(BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325)),
@@ -400,7 +400,7 @@ async fn main() -> Result<()> {
             //BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000),
             //Box::new(BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000)),
             Box::new(BoundingPolygon::new("[out:xml];relation['name'='Nikšić']['boundary'='administrative']; way(r); out geom;".to_string()).await?),
-        ), */
+        ),
     ];
 
     let remote_id = get_remote_latest_changeset_id().await?;
