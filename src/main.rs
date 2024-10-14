@@ -355,7 +355,7 @@ async fn main() -> Result<()> {
     let bounding_boxes:Vec<(&str, Box<dyn Boundaries>)> = vec![
         (
             "Montenegro",
-            Box::new(BoundingPolygon::new("relation['name'='Montenegro']['boundary'='administrative']; way(r)".to_string()).await?),
+            Box::new(BoundingPolygon::new("relation['name'='Crna Gora / Црна Гора']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
             "Budva",
@@ -363,10 +363,18 @@ async fn main() -> Result<()> {
             Box::new(BoundingPolygon::new("relation['name'='Budva']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
+            "Budva+",
+            //BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062),
+            Box::new(BoundingPolygon::new("relation['name'='Opština Budva']['boundary'='administrative']; way(r)".to_string()).await?),
+        ),
         (
             "Kotor",
             //BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325),
             Box::new(BoundingPolygon::new("way['name'='Kotor']['place'='town']".to_string()).await?),
+        ),
+        (
+            "Kotor+",
+            Box::new(BoundingPolygon::new("relation['name'='Opština Kotor']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
             "Cetinje",
