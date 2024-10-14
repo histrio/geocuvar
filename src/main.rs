@@ -176,10 +176,7 @@ impl BoundingPolygon {
         let mut current_way = &overpass.ways[0];
         let mut reverse = false;
         let mut processed_ways = vec![];
-        loop {
-            if processed_ways.contains(&current_way.id) {
-                break;
-            }
+        while !processed_ways.contains(&current_way.id) {
             processed_ways.push(current_way.id);
             if reverse {
                 for node in current_way.nodes.iter().rev() {
@@ -191,34 +188,34 @@ impl BoundingPolygon {
                 }
             }
 
-            let last_node: &Node;
-            if reverse {
-                last_node = current_way.nodes.first().unwrap();
+            let last_node = if reverse {
+                current_way.nodes.first().unwrap()
             } else {
-                last_node = current_way.nodes.last().unwrap();
-            }
+                current_way.nodes.last().unwrap()
+            };
 
             // find next way
             if let Some(next_way) = overpass.ways.iter().find(|way| way.nodes.first().unwrap().ref_id == last_node.ref_id && way.id != current_way.id) {
                 reverse = false;
                 current_way = next_way;
+            } else if let Some(next_way) = overpass.ways.iter().find(|way| way.nodes.last().unwrap().ref_id == last_node.ref_id && way.id != current_way.id) {
+                reverse = true;
+                current_way = next_way;
             } else {
-                if let Some(next_way) = overpass.ways.iter().find(|way| way.nodes.last().unwrap().ref_id == last_node.ref_id && way.id != current_way.id) {
-                    reverse = true;
-                    current_way = next_way;
-                } else {
-                    let ways_count = overpass.ways.len();
-                    if ways_count == processed_ways.len() {
-                        break;
-                    }
-                    panic!("no next way found");
+                let ways_count = overpass.ways.len();
+                if ways_count == processed_ways.len() {
+                    break;
                 }
+                panic!("no next way found");
             }
         }
+        // Dump polygon points
+        //fs::write("polygon_points.txt", format!("{:?}", polygon_points)).await?;
         let polygon = Polygon::new(polygon_points.into(), vec![]);
-        let simplified_polygon = polygon.simplify_vw(&0.0001);
-        Ok(Self { polygon: simplified_polygon })
-
+        println!("Polygon points count before simplification: {}", polygon.exterior().0.len());
+        //let simplified_polygon = polygon.simplify_vw(&0.000001);
+        //println!("Polygon points count after simplification: {}", simplified_polygon.exterior().0.len());
+        Ok(Self { polygon })
 
     }
 
@@ -365,6 +362,7 @@ async fn main() -> Result<()> {
             //BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062),
             Box::new(BoundingPolygon::new("relation['name'='Budva']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
+        (
         (
             "Kotor",
             //BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325),
