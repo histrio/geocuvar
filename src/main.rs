@@ -73,10 +73,7 @@ struct Content {
     comment: String,
     created_by: String,
     tags: Vec<String>,
-    min_lon: f64,
-    min_lat: f64,
-    max_lon: f64,
-    max_lat: f64,
+    bbox: BoundingBox,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -504,10 +501,7 @@ async fn main() -> Result<()> {
                         comment,
                         created_by,
                         tags,
-                        min_lon: bbox.min_lon,
-                        min_lat: bbox.min_lat,
-                        max_lon: bbox.max_lon,
-                        max_lat: bbox.max_lat,
+                        bbox: bbox,
                     };
 
                     let yaml_string = serde_yaml::to_string(&content)?;
