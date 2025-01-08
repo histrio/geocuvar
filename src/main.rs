@@ -371,7 +371,7 @@ async fn main() -> Result<()> {
         (
             "Kotor",
             //BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325),
-            Box::new(BoundingPolygon::new("way['name'='Kotor']['place'='town']".to_string()).await?),
+            Box::new(BoundingPolygon::new("relation['name'='Kotor']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
             "Kotor+",
