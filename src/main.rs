@@ -13,6 +13,8 @@ use xml::reader::{EventReader, XmlEvent};
 use geo::algorithm::contains::Contains;
 use geo::{Polygon};
 
+use chrono::{DateTime, Utc};
+
 use geo::SimplifyVw;
 
 
@@ -524,17 +526,20 @@ async fn main() -> Result<()> {
 
     // Get files older than 1 year and remove them
     let one_year_ago = chrono::Utc::now() - chrono::Duration::days(365);
-    info!("Removing files older than one year");
+    let changesets_dir = dir_path.join("content").join("changesets");
+    info!("Removing files older than one year in: {:?}", changesets_dir);
 
     // iter over dir *.md files and remove those older than one year
-    let mut iter_files = fs::read_dir(dir_path.join("content").join("changesets")).await?;
+    let mut iter_files = fs::read_dir(changesets_dir).await?;
     while let Some(entry_result) = iter_files.next_entry().await? {
+        //info!("Entry: {:?}", entry_result);
         let entry = entry_result;
 
         if entry.path().extension().and_then(OsStr::to_str) == Some("md") {
             let metadata = entry.metadata().await?;
             if let Ok(modified) = metadata.modified() {
-                if modified < one_year_ago.into() {
+                let modified_time: DateTime<Utc> = modified.into();
+                if modified_time < one_year_ago {
                     info!("Removing file: {:?}", entry.path());
                     fs::remove_file(entry.path()).await?;
                 }
