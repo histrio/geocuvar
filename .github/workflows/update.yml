@@ -2,7 +2,7 @@ name: Update content
 
 on:
   schedule:
-    - cron: '0 7,12,17 * * *' # Runs at 7:00 AM 12:00 AM and 5:00 PM every day
+    - cron: '0 0,4,8,12,16,20 * * *' # Runs at 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
   workflow_dispatch: # This line enables manual triggering of the workflow
 
 
