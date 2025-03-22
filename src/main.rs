@@ -532,16 +532,13 @@ async fn main() -> Result<()> {
     // iter over dir *.md files and remove those older than one year
     let mut iter_files = fs::read_dir(changesets_dir).await?;
     while let Some(entry_result) = iter_files.next_entry().await? {
-        //info!("Entry: {:?}", entry_result);
-        let entry = entry_result;
-
-        if entry.path().extension().and_then(OsStr::to_str) == Some("md") {
-            let metadata = entry.metadata().await?;
+        if entry_result.path().extension().and_then(OsStr::to_str) == Some("md") {
+            let metadata = entry_result.metadata().await?;
             if let Ok(modified) = metadata.modified() {
                 let modified_time: DateTime<Utc> = modified.into();
                 if modified_time < one_year_ago {
-                    info!("Removing file: {:?}", entry.path());
-                    fs::remove_file(entry.path()).await?;
+                    info!("Removing file: {:?}", entry_result.path());
+                    fs::remove_file(entry_result.path()).await?;
                 }
             }
         }
