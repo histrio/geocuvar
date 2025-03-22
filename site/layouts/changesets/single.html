@@ -1,9 +1,24 @@
 {{ define "title" }}{{ i18n "siteTitle" }} | {{ .Title }}{{ end }}
 {{ define "main" }}
+
+{{ $pages := .CurrentSection.Pages.ByDate }}
+
 <article class="article-content changeset-detail">
-    <header>
-        <h3 class="changeset-id">Changeset #{{ .Params.id }}</h3>
-    </header>
+<header class="nav-container">
+    {{ with $pages.Prev . }}
+    <a href="{{ .RelPermalink }}" class="nav-link">&lt;&lt;</a>
+    {{ else }}
+    <span class="nav-spacer"></span>
+    {{ end }}
+
+    <h3 class="changeset-header">Changeset #{{ .Params.id }}</h3>
+
+    {{ with $pages.Next . }}
+    <a href="{{ .RelPermalink }}" class="nav-link">&gt;&gt;</a>
+    {{ else }}
+    <span class="nav-spacer"></span>
+    {{ end }}
+</header>
 
     <div class="meta-box">
         <div class="meta-item">
@@ -24,7 +39,15 @@
     {{ if .Params.bbox }}
     <section class="map-section">
         <div class="map-container">
-            <div id="map" class="osm-map"></div>
+            <div id="map" 
+                 class="osm-map"
+                 data-bbox="{{ dict 
+                        "minLat" .Params.bbox.min_lat
+                        "minLon" .Params.bbox.min_lon
+                        "maxLat" .Params.bbox.max_lat
+                        "maxLon" .Params.bbox.max_lon
+                     | jsonify }}"
+                 ></div>
         </div>
     </section>
     {{ else }}
@@ -62,39 +85,6 @@
 {{ if .Params.bbox }}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-(function() {
-    const bbox = {
-        minLat: {{ .Params.bbox.min_lat }},
-        minLon: {{ .Params.bbox.min_lon }},
-        maxLat: {{ .Params.bbox.max_lat }},
-        maxLon: {{ .Params.bbox.max_lon }}
-    };
-
-    const map = L.map('map').fitBounds([
-        [bbox.minLat, bbox.minLon],
-        [bbox.maxLat, bbox.maxLon]
-    ]);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
-
-    // Add bounding box with hover effect
-    const bounds = [[bbox.minLat, bbox.minLon], [bbox.maxLat, bbox.maxLon]];
-    const rectangle = L.rectangle(bounds, {
-        color: '#d33838',
-        weight: 2,
-        fillOpacity: 0.1
-    }).addTo(map);
-
-    // Add interactive popup
-    rectangle.bindPopup(`
-        <b>Bounding Box:</b><br>
-        SW: ${bbox.minLat.toFixed(5)}, ${bbox.minLon.toFixed(5)}<br>
-        NE: ${bbox.maxLat.toFixed(5)}, ${bbox.maxLon.toFixed(5)}
-    `);
-})();
-</script>
+<script src="{{ "js/map-init.js" | relURL }}"></script>
 {{ end }}
 {{ end }}
