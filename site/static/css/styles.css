@@ -122,3 +122,85 @@ h1 a:hover, h1 a:focus {
     text-decoration: none; /* This ensures there is no underline on hover or focus */
     color: inherit; /* Keeps the color unchanged on hover or focus */
 }
+
+/* General article styling */
+.changeset-detail {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Metadata section */
+.meta-box {
+    margin: 1rem 0;
+    padding: 1rem;
+    background: #f8f9fa;
+    border: 1px solid #ddd;
+}
+
+.meta-item {
+    margin: 0.5rem 0;
+}
+
+.comment-box {
+    margin-top: 0.5rem;
+    padding: 0.3rem 0.7rem;
+    background: #fff;
+    border: 1px solid #eee;
+}
+
+/* Map section */
+.map-container {
+    margin: 1rem 0;
+}
+
+.osm-map {
+    width: 100%;
+    height: 500px;
+    border: 1px solid #ddd;
+}
+
+/* Warning message */
+.warning-message {
+    color: #856404;
+    background: #fff3cd;
+    padding: 0.75rem;
+    border: 1px solid #ffeeba;
+    margin: 1rem 0;
+}
+
+/* Tools grid */
+.tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.tool-card {
+    display: block;
+    padding: 1rem;
+    border: 1px solid #eee;
+    text-decoration: none;
+    color: inherit;
+}
+
+.tool-card h3 {
+    margin: 0 0 0.5rem 0;
+    color: #333;
+}
+
+.tool-card p {
+    margin: 0;
+    color: #666;
+}
+
+/* Link styling */
+.user-link {
+    color: #0066cc;
+    text-decoration: none;
+}
+
+.user-link:hover {
+    text-decoration: underline;
+}

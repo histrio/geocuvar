@@ -1,37 +1,100 @@
 {{ define "title" }}{{ i18n "siteTitle" }} | {{ .Title }}{{ end }}
 {{ define "main" }}
-<article class="article-content">
-    <h1>Changeset ID: {{ .Params.id }}</h1>
-    <div class="meta">
-        <p>Created: {{ .PublishDate }}</p>
+<article class="article-content changeset-detail">
+    <header>
+        <h3 class="changeset-id">Changeset #{{ .Params.id }}</h3>
+    </header>
+
+    <div class="meta-box">
+        <div class="meta-item">
+            <strong>User:</strong> 
+            <a href="https://www.openstreetmap.org/user/{{ .Params.user }}" class="user-link">{{ .Params.user }}</a>
+        </div>
+        <div class="meta-item">
+            <strong>Date:</strong> {{ .PublishDate.Format "2006-01-02 15:04" }}
+        </div>
+        <div class="meta-item">
+            <strong>Editor:</strong> {{ .Params.created_by }}
+        </div>
+        <div class="comment-box">
+            <strong>Comment:</strong> {{ .Params.comment }}
+        </div>
     </div>
-    <section>
-        User <a href="https://www.openstreetmap.org/user/{{ .Params.user }}">{{ .Params.user }}</a> 
-        has uploaded a <a href="https://www.openstreetmap.org/browse/changeset/{{ .Params.id }}">changeset</a> in your watched area 
-        using {{ .Params.created_by}}, titled "{{ .Params.comment }}". 
-<br/>
 
-{{ if .Params.bbox }}
-  <iframe 
-    width="100%" 
-    height="500" 
-    frameborder="0" 
-    scrolling="no" 
-    marginheight="0" 
-    marginwidth="0" 
-    src="https://www.openstreetmap.org/export/embed.html?bbox={{ .Params.bbox.min_lon }},{{ .Params.bbox.min_lat }},{{ .Params.bbox.max_lon }},{{ .Params.bbox.max_lat }}">
-  </iframe>
-  <br/>
-    <a href="https://www.openstreetmap.org/?bbox={{ .Params.bbox.min_lon }},{{ .Params.bbox.min_lat }},{{ .Params.bbox.max_lon }},{{ .Params.bbox.max_lat }}">View larger map</a>
-{{ else }}
-  <p>No bounding box data available.</p>
-{{ end }}
+    {{ if .Params.bbox }}
+    <section class="map-section">
+        <div class="map-container">
+            <div id="map" class="osm-map"></div>
+        </div>
+    </section>
+    {{ else }}
+    <p class="warning-message">
+        No bounding box data available
+    </p>
+    {{ end }}
 
-        <ul>
-            <li><a href="https://nrenner.github.io/achavi/?changeset={{ .Params.id }}">Show it on Achavi.</a></li>
-            <li><a href="https://osmcha.org/{{ .Params.id }}">Show it on OSMChA.</a></li>
-            <li><a href="https://resultmaps.neis-one.org/osm-change-viz?c={{ .Params.id }}">Show it on Osm Change Viz.</a></li>
-        </ul>
+    <section class="tools-section">
+        <div class="tools-grid">
+            <a href="https://www.openstreetmap.org/changeset/{{ .Params.id }}" class="tool-card">
+                <h3>OpenStreetMap</h3>
+                <p>View changeset</p>
+            </a>
+
+            <a href="https://nrenner.github.io/achavi/?changeset={{ .Params.id }}" class="tool-card">
+                <h3>Achavi</h3>
+                <p>Before/after comparison</p>
+            </a>
+            
+            <a href="https://osmcha.org/changesets/{{ .Params.id }}" class="tool-card">
+                <h3>OSMCha</h3>
+                <p>Quality assurance checks</p>
+            </a>
+
+            <a href="https://resultmaps.neis-one.org/osm-change-viz?c={{ .Params.id }}" class="tool-card" target="_blank">
+                <h3>Change Viz</h3>
+                <p>Object-level visualization</p>
+            </a>
+
+        </div>
     </section>
 </article>
+
+{{ if .Params.bbox }}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function() {
+    const bbox = {
+        minLat: {{ .Params.bbox.min_lat }},
+        minLon: {{ .Params.bbox.min_lon }},
+        maxLat: {{ .Params.bbox.max_lat }},
+        maxLon: {{ .Params.bbox.max_lon }}
+    };
+
+    const map = L.map('map').fitBounds([
+        [bbox.minLat, bbox.minLon],
+        [bbox.maxLat, bbox.maxLon]
+    ]);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Add bounding box with hover effect
+    const bounds = [[bbox.minLat, bbox.minLon], [bbox.maxLat, bbox.maxLon]];
+    const rectangle = L.rectangle(bounds, {
+        color: '#d33838',
+        weight: 2,
+        fillOpacity: 0.1
+    }).addTo(map);
+
+    // Add interactive popup
+    rectangle.bindPopup(`
+        <b>Bounding Box:</b><br>
+        SW: ${bbox.minLat.toFixed(5)}, ${bbox.minLon.toFixed(5)}<br>
+        NE: ${bbox.maxLat.toFixed(5)}, ${bbox.maxLon.toFixed(5)}
+    `);
+})();
+</script>
+{{ end }}
 {{ end }}
