@@ -393,20 +393,40 @@ async fn main() -> Result<()> {
             //BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
             Box::new(BoundingPolygon::new("relation['name'='Tivat']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
+        /* (
+            "Tivat+",
+            //BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
+            Box::new(BoundingPolygon::new("relation['name'='Opština Tivat']['boundary'='administrative']; way(r)".to_string()).await?),
+        ), */
         (
             "Bar", 
             //BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
             Box::new(BoundingPolygon::new("relation['name'='Bar']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
+        /* (
+            "Bar+", 
+            //BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
+            Box::new(BoundingPolygon::new("relation['name'='Opština Bar']['boundary'='administrative']; way(r)".to_string()).await?),
+        ), */
         (
             "Podgorica",
             //BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100),
             Box::new(BoundingPolygon::new("relation['name'='Podgorica']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
         (
+            "Podgorica+",
+            //BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100),
+            Box::new(BoundingPolygon::new("relation['name'='Glavni grad Podgorica']['boundary'='administrative']; way(r)".to_string()).await?),
+        ),
+        (
             "Nikšić",
             //BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000),
             Box::new(BoundingPolygon::new("relation['name'='Nikšić']['boundary'='administrative']; way(r)".to_string()).await?),
+        ),
+        (
+            "Nikšić+",
+            //BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000),
+            Box::new(BoundingPolygon::new("relation['name'='Opština Nikšić']['boundary'='administrative']; way(r)".to_string()).await?),
         ),
     ];
 
