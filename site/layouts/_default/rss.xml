@@ -37,6 +37,11 @@
         has uploaded a <a href="https://www.openstreetmap.org/browse/changeset/{{ .Params.id }}">changeset</a> in your watched area 
         using {{ .Params.created_by}}, titled "{{ .Params.comment }}". 
       </description>
+      {{- if .Params.tags }}
+        {{- range .Params.tags }}
+      <category>{{ . }}</category>
+        {{- end }}
+      {{- end }}
     </item>
     {{- end }}
   </channel>
