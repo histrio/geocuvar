@@ -8,6 +8,6 @@ title = 'GEOCUVAR'
     pageRef = '/about'
     weight = 10
 
-#[services]
-#  [services.rss]
-#    limit = 45
+[services]
+  [services.rss]
+    limit = 90
