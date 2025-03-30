@@ -33,7 +33,7 @@ jobs:
       - name: Cache cargo index
         uses: actions/cache@v3
         with:
-          path: ~/.cargo/git
+          path: ~/.cargo/git/db
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-index-
 
@@ -44,8 +44,11 @@ jobs:
           key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-build-
 
+      - name: Fetch dependencies
+        run: cargo fetch --locked
+
       - name: Build Rust application
-        run: cargo build --release
+        run: cargo build --locked --relase
 
       - name: Run Rust application
         run: ./target/release/geocuvar
