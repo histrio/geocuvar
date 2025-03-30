@@ -15,10 +15,8 @@ use geo::{Polygon};
 
 use chrono::{DateTime, Utc};
 
-use geo::SimplifyVw;
 
 
-use tokio::io::AsyncWriteExt;
 
 
 // Declare turbopass query as string alias 
@@ -213,13 +211,16 @@ impl BoundingPolygon {
             }
         }
         // Dump polygon points
+        // use tokio::io::AsyncWriteExt;
         //fs::write("polygon_points.txt", format!("{:?}", polygon_points)).await?;
+        
         let polygon = Polygon::new(polygon_points.into(), vec![]);
-        println!("Polygon points count before simplification: {}", polygon.exterior().0.len());
-        //let simplified_polygon = polygon.simplify_vw(&0.000001);
-        //println!("Polygon points count after simplification: {}", simplified_polygon.exterior().0.len());
-        Ok(Self { polygon })
+        info!("Polygon points count: {}", polygon.exterior().0.len());
 
+        // use geo::SimplifyVw;
+        //let simplified_polygon = polygon.simplify_vw(&0.000001);
+        //info!("Polygon points count after simplification: {}", simplified_polygon.exterior().0.len());
+        Ok(Self { polygon })
     }
 
 }
@@ -540,7 +541,8 @@ async fn main() -> Result<()> {
             }
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
         write_local_latest_changeset_id(id).await?;
     }
 
