@@ -51,7 +51,7 @@ jobs:
         run: cargo build --locked --release
 
       - name: Run Rust application
-        run: ./target/release/geocuvar
+        run: RUST_LOG=info ./target/release/geocuvar
 
       - name: Github commit
         run: |
