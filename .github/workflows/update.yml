@@ -37,11 +37,12 @@ jobs:
           key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-build-
 
-      - name: Debug cargo registry contents
-        run: ls -R ~/.cargo/registry
 
-      - name: Fetch dependencies
-        run: cargo fetch --locked
+      # - name: Fetch dependencies
+      #   run: cargo fetch --locked
+
+      - name: Debug cargo registry contents
+        run: ls -R target
 
       - name: Build Rust application
         run: cargo build --locked --release
