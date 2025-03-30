@@ -48,7 +48,7 @@ jobs:
         run: cargo fetch --locked
 
       - name: Build Rust application
-        run: cargo build --locked --relase
+        run: cargo build --locked --release
 
       - name: Run Rust application
         run: ./target/release/geocuvar
