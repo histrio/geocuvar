@@ -239,7 +239,7 @@ impl BoundingPolygon {
 
 impl Boundaries for BoundingPolygon {
     fn intersects(&self, other: &BoundingBox) -> bool {
-        // in some cases it cound be a point when coords are the same
+        // in some cases it count be a point when coords are the same
         let polygon = &self.polygons[0];
         if other.min_lon == other.max_lon && other.min_lat == other.max_lat {
             return polygon.contains(&geo::Point::new(other.min_lon, other.min_lat));
@@ -421,23 +421,23 @@ async fn get_tag_value(changeset: &Changeset, tag_name: &str) -> String {
 async fn get_bounding_boxes() -> Result<BoundingBoxes> {
     let dir_path = get_home_folder().await?;
 
-    let cached_boudaries = dir_path.join("boundaries.yaml");
+    let cached_boundaries = dir_path.join("boundaries.yaml");
 
-    if cached_boudaries.is_file() {
+    if cached_boundaries.is_file() {
         let month_ago = chrono::Utc::now() - chrono::Duration::days(30);
-        let metadata = fs::metadata(&cached_boudaries).await?;
+        let metadata = fs::metadata(&cached_boundaries).await?;
         let created = metadata.created()?;
         let created_time: DateTime<Utc> = created.into();
         if created_time > month_ago {
-            info!("Cache hit in {:?}", &cached_boudaries);
-            let yaml_string = fs::read_to_string(&cached_boudaries).await?;
-            let bouding_boxes: BoundingBoxes = serde_yaml::from_str(&yaml_string)?;
-            return Ok(bouding_boxes);
+            info!("Cache hit in {:?}", &cached_boundaries);
+            let yaml_string = fs::read_to_string(&cached_boundaries).await?;
+            let bounding_boxes: BoundingBoxes = serde_yaml::from_str(&yaml_string)?;
+            return Ok(bounding_boxes);
         } else {
             info!("Cache miss: too old {:?}", created_time);
         }
     } else {
-        info!("Cache miss: no such file {:?}", &cached_boudaries);
+        info!("Cache miss: no such file {:?}", &cached_boundaries);
     }
 
     let bounding_boxes: BoundingBoxes = vec![
@@ -545,9 +545,9 @@ async fn get_bounding_boxes() -> Result<BoundingBoxes> {
     ];
 
     let yaml_string = serde_yaml::to_string(&bounding_boxes)?;
-    fs::write(&cached_boudaries, yaml_string)
+    fs::write(&cached_boundaries, yaml_string)
         .await
-        .context(format!("Can't crate cache file: {:?}", &cached_boudaries))?;
+        .context(format!("Can't crate cache file: {:?}", &cached_boundaries))?;
 
     Ok(bounding_boxes)
 }
