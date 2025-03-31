@@ -157,6 +157,11 @@ struct BoundingPolygon {
 
 async fn get_overpass(query: &TurbopassQuery) -> Result<Overpass> {
     let turbopass_query = format!("[out:xml]; {}; out geom;", query);
+
+    info!(
+        "Calculating bounding polygon for query: '{}'",
+        turbopass_query
+    );
     let turbopass_query_url = format!(
         "https://overpass-api.de/api/interpreter?data={}",
         turbopass_query
@@ -169,7 +174,6 @@ async fn get_overpass(query: &TurbopassQuery) -> Result<Overpass> {
 
 impl BoundingPolygon {
     async fn new(query: TurbopassQuery) -> Result<Self> {
-        info!("Calculating bounding polygon for query: {}", query);
         let overpass = get_overpass(&query).await?;
 
         let mut polygon_points = vec![];
@@ -224,6 +228,7 @@ impl BoundingPolygon {
         // use geo::SimplifyVw;
         //let simplified_polygon = polygon.simplify_vw(&0.000001);
         //info!("Polygon points count after simplification: {}", simplified_polygon.exterior().0.len());
+
         let polygons = vec![polygon];
         Ok(Self { polygons })
     }
