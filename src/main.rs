@@ -11,16 +11,14 @@ use tokio::fs;
 use xml::reader::{EventReader, XmlEvent};
 
 use geo::algorithm::contains::Contains;
-use geo::{Polygon};
+use geo::Polygon;
 
 use chrono::{DateTime, Utc};
 
-
-
-
-
-// Declare turbopass query as string alias 
+// Declare turbopass query as string alias
 type TurbopassQuery = String;
+
+type ChangesetID = String;
 
 fn deserialize_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
 where
@@ -31,10 +29,7 @@ where
     s.parse::<f64>().map_err(de::Error::custom)
 }
 
-
-
 // ------------------------------------------------------------------------------------------------
-
 
 #[derive(Default, Debug, Deserialize, Serialize)]
 struct BoundingBox {
@@ -96,7 +91,6 @@ struct Osm {
 // ------------------------------------------------------------------------------------------------
 // Overpass API
 
-
 #[derive(Debug, Deserialize)]
 pub struct Overpass {
     #[serde(rename = "version")]
@@ -151,26 +145,37 @@ pub struct Meta {
     pub osm_base: String,
 }
 
-
-
 // ------------------------------------------------------------------------------------------------
 
 trait Boundaries {
     fn intersects(&self, other: &BoundingBox) -> bool;
 }
 
+#[derive(Debug, Deserialize, Serialize)]
 struct BoundingPolygon {
-    polygon: Polygon
+    polygons: Vec<Polygon>,
+}
+
+async fn get_overpass(query: &TurbopassQuery) -> Result<Overpass> {
+    let turbopass_query = format!("[out:xml]; {}; out geom;", query);
+
+    info!(
+        "Calculating bounding polygon for query: '{}'",
+        turbopass_query
+    );
+    let turbopass_query_url = format!(
+        "https://overpass-api.de/api/interpreter?data={}",
+        turbopass_query
+    );
+    let response = reqwest::get(&turbopass_query_url).await?;
+    let xml_data = response.text().await?;
+    let overpass: Overpass = from_str(&xml_data)?;
+    Ok(overpass)
 }
 
 impl BoundingPolygon {
     async fn new(query: TurbopassQuery) -> Result<Self> {
-        info!("Calculating bounding polygon for query: {}", query);
-        let turbopass_query = format!("[out:xml]; {}; out geom;", query);
-        let turbopass_query_url = format!("https://overpass-api.de/api/interpreter?data={}", turbopass_query);
-        let response = reqwest::get(&turbopass_query_url).await?;
-        let xml_data = response.text().await?;
-        let overpass: Overpass = from_str(&xml_data)?;
+        let overpass = get_overpass(&query).await?;
 
         let mut polygon_points = vec![];
         // pop first way as current way
@@ -196,10 +201,14 @@ impl BoundingPolygon {
             };
 
             // find next way
-            if let Some(next_way) = overpass.ways.iter().find(|way| way.nodes.first().unwrap().ref_id == last_node.ref_id && way.id != current_way.id) {
+            if let Some(next_way) = overpass.ways.iter().find(|way| {
+                way.nodes.first().unwrap().ref_id == last_node.ref_id && way.id != current_way.id
+            }) {
                 reverse = false;
                 current_way = next_way;
-            } else if let Some(next_way) = overpass.ways.iter().find(|way| way.nodes.last().unwrap().ref_id == last_node.ref_id && way.id != current_way.id) {
+            } else if let Some(next_way) = overpass.ways.iter().find(|way| {
+                way.nodes.last().unwrap().ref_id == last_node.ref_id && way.id != current_way.id
+            }) {
                 reverse = true;
                 current_way = next_way;
             } else {
@@ -210,26 +219,30 @@ impl BoundingPolygon {
                 panic!("no next way found");
             }
         }
+
         // Dump polygon points
         // use tokio::io::AsyncWriteExt;
         //fs::write("polygon_points.txt", format!("{:?}", polygon_points)).await?;
-        
+
         let polygon = Polygon::new(polygon_points.into(), vec![]);
         info!("Polygon points count: {}", polygon.exterior().0.len());
 
         // use geo::SimplifyVw;
         //let simplified_polygon = polygon.simplify_vw(&0.000001);
         //info!("Polygon points count after simplification: {}", simplified_polygon.exterior().0.len());
-        Ok(Self { polygon })
-    }
 
+        let polygons = vec![polygon];
+
+        Ok(Self { polygons })
+    }
 }
 
 impl Boundaries for BoundingPolygon {
     fn intersects(&self, other: &BoundingBox) -> bool {
-        // in some cases it cound be a point when coords are the same
+        // in some cases it count be a point when coords are the same
+        let polygon = &self.polygons[0];
         if other.min_lon == other.max_lon && other.min_lat == other.max_lat {
-            return self.polygon.contains(&geo::Point::new(other.min_lon, other.min_lat));
+            return polygon.contains(&geo::Point::new(other.min_lon, other.min_lat));
         }
         // counterclockwise order for the exterior ring
         let other_polygon_points = vec![
@@ -240,7 +253,7 @@ impl Boundaries for BoundingPolygon {
             (other.min_lon, other.min_lat), // Close the loop (back to bottom-left)
         ];
         let other_polygon = Polygon::new(other_polygon_points.into(), vec![]);
-        self.polygon.contains(&other_polygon)
+        polygon.contains(&other_polygon)
     }
 }
 
@@ -255,7 +268,6 @@ impl BoundingBox {
     }
 }
 
-
 impl Boundaries for BoundingBox {
     fn intersects(&self, other: &BoundingBox) -> bool {
         self.min_lon < other.max_lon
@@ -264,6 +276,9 @@ impl Boundaries for BoundingBox {
             && self.max_lat > other.min_lat
     }
 }
+
+type RegionName = String;
+type BoundingBoxes = Vec<(RegionName, BoundingPolygon)>;
 
 const REPLICATION_SERVER: &str = "https://planet.openstreetmap.org/replication";
 
@@ -325,7 +340,7 @@ async fn write_local_latest_changeset_id(id: i32) -> Result<()> {
     Ok(())
 }
 
-fn get_changesets(xml_data: &str) -> Result<Vec<String>> {
+fn get_changesets_list(xml_data: &str) -> Result<Vec<ChangesetID>> {
     let parser = EventReader::from_str(xml_data);
     let mut unique_values = HashSet::new();
 
@@ -350,90 +365,206 @@ fn get_changesets(xml_data: &str) -> Result<Vec<String>> {
     Ok(unique_values.into_iter().collect())
 }
 
+async fn get_changeset_xml_data(id: i32) -> Result<String> {
+    let id_padded = format!("{:09}", id);
+    let url = format!(
+        "{}/minute/{}/{}/{}.osc.gz",
+        REPLICATION_SERVER,
+        &id_padded[0..3],
+        &id_padded[3..6],
+        &id_padded[6..9],
+    );
+    debug!("Update URL: {}", url);
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    env_logger::init();
+    let response = reqwest::get(&url).await?;
+    let body = response.bytes().await?;
+    let mut decoder = flate2::read::GzDecoder::new(&body[..]);
+    let mut xml_data = String::new();
+    decoder.read_to_string(&mut xml_data)?;
+    Ok(xml_data.to_string())
+}
+
+async fn get_osm_data(chunk: &[String]) -> Result<Osm> {
+    let changesets_csv = chunk.join(",");
+    let changesets_url = format!(
+        "https://api.openstreetmap.org/api/0.6/changesets?changesets={}",
+        changesets_csv
+    );
+
+    let response = reqwest::get(&changesets_url).await?;
+    let body = response.text().await?;
+    debug!("XML: {}", body);
+
+    let osm_data: Osm = from_str(&body)?;
+    Ok(osm_data)
+}
+
+async fn dump_data(file_path: &PathBuf, content: &Content) -> Result<()> {
+    let yaml_string = serde_yaml::to_string(&content)?;
+    let file_content = format!("---\n{}\n---\n", yaml_string);
+    fs::write(&file_path, file_content)
+        .await
+        .context("Failed to write changeset file")?;
+    Ok(())
+}
+
+async fn get_tag_value(changeset: &Changeset, tag_name: &str) -> String {
+    match &changeset.tag {
+        Some(tags) => match tags.iter().find(|tag| tag.k == tag_name) {
+            Some(tag) => tag.v.clone(),
+            None => String::new(),
+        },
+        None => String::new(),
+    }
+}
+
+async fn get_bounding_boxes() -> Result<BoundingBoxes> {
     let dir_path = get_home_folder().await?;
 
-    let bounding_boxes:Vec<(&str, Box<dyn Boundaries>)> = vec![
+    let cached_boundaries = dir_path.join("boundaries.yaml");
+
+    if cached_boundaries.is_file() {
+        let month_ago = chrono::Utc::now() - chrono::Duration::days(30);
+        let metadata = fs::metadata(&cached_boundaries).await?;
+        let created = metadata.created()?;
+        let created_time: DateTime<Utc> = created.into();
+        if created_time > month_ago {
+            info!("Cache hit in {:?}", &cached_boundaries);
+            let yaml_string = fs::read_to_string(&cached_boundaries).await?;
+            let bounding_boxes: BoundingBoxes = serde_yaml::from_str(&yaml_string)?;
+            return Ok(bounding_boxes);
+        } else {
+            info!("Cache miss: too old {:?}", created_time);
+        }
+    } else {
+        info!("Cache miss: no such file {:?}", &cached_boundaries);
+    }
+
+    let bounding_boxes: BoundingBoxes = vec![
         (
-            "Montenegro",
-            Box::new(BoundingPolygon::new("relation['name'='Crna Gora / Црна Гора']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Montenegro".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Crna Gora / Црна Гора']['boundary'='administrative']; way(r)"
+                    .to_string(),
+            )
+            .await?,
         ),
         (
-            "Budva",
-            //BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062),
-            Box::new(BoundingPolygon::new("relation['name'='Budva']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Budva".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Budva']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Budva+",
-            //BoundingBox::new(18.8090, 42.2718, 18.8580, 42.3062),
-            Box::new(BoundingPolygon::new("relation['name'='Opština Budva']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Budva+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Budva']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Kotor",
-            //BoundingBox::new(18.7484, 42.4075, 18.7784, 42.4325),
-            Box::new(BoundingPolygon::new("relation['name'='Kotor']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Kotor".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Kotor']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Kotor+",
-            Box::new(BoundingPolygon::new("relation['name'='Opština Kotor']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Kotor+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Kotor']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Cetinje",
-            //BoundingBox::new(18.9100, 42.3730, 18.9450, 42.3930),
-            Box::new(BoundingPolygon::new("way['name'='Cetinje']['place'='town']".to_string()).await?),
+            "Cetinje".to_string(),
+            BoundingPolygon::new("way['name'='Cetinje']['place'='town']".to_string()).await?,
         ),
         (
-            "Cetinje+",
-            Box::new(BoundingPolygon::new("relation['name'='Prijestolnica Cetinje']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Cetinje+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Prijestolnica Cetinje']['boundary'='administrative']; way(r)"
+                    .to_string(),
+            )
+            .await?,
         ),
         (
-            "Tivat",
-            //BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
-            Box::new(BoundingPolygon::new("relation['name'='Tivat']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Tivat".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Tivat']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         /* (
-            "Tivat+",
+            "Tivat+".to_string(),
             //BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
             Box::new(BoundingPolygon::new("relation['name'='Opština Tivat']['boundary'='administrative']; way(r)".to_string()).await?),
         ), */
         (
-            "Bar", 
-            //BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
-            Box::new(BoundingPolygon::new("relation['name'='Bar']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Bar".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Bar']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         /* (
-            "Bar+", 
-            //BoundingBox::new(19.0700, 42.0800, 19.1500, 42.1300)),
+            "Bar+".to_string(),
             Box::new(BoundingPolygon::new("relation['name'='Opština Bar']['boundary'='administrative']; way(r)".to_string()).await?),
         ), */
         (
-            "Podgorica",
-            //BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100),
-            Box::new(BoundingPolygon::new("relation['name'='Podgorica']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Podgorica".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Podgorica']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Podgorica+",
-            //BoundingBox::new(19.1600, 42.3900, 19.3200, 42.5100),
-            Box::new(BoundingPolygon::new("relation['name'='Glavni grad Podgorica']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Podgorica+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Glavni grad Podgorica']['boundary'='administrative']; way(r)"
+                    .to_string(),
+            )
+            .await?,
         ),
         (
-            "Nikšić",
-            //BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000),
-            Box::new(BoundingPolygon::new("relation['name'='Nikšić']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Nikšić".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Nikšić']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Nikšić+",
-            //BoundingBox::new(18.9200, 42.7500, 19.0500, 42.8000),
-            Box::new(BoundingPolygon::new("relation['name'='Opština Nikšić']['boundary'='administrative']; way(r)".to_string()).await?),
+            "Nikšić+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Nikšić']['boundary'='administrative']; way(r)"
+                    .to_string(),
+            )
+            .await?,
         ),
     ];
+
+    let yaml_string = serde_yaml::to_string(&bounding_boxes)?;
+    fs::write(&cached_boundaries, yaml_string)
+        .await
+        .context(format!("Can't crate cache file: {:?}", &cached_boundaries))?;
+
+    Ok(bounding_boxes)
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::init();
+
+    let dir_path = get_home_folder().await?;
 
     let remote_id = get_remote_latest_changeset_id().await?;
     let local_id = get_local_latest_changeset_id().await?;
     debug!("Remote ID: {}, Local ID: {}", remote_id, local_id);
+
+    let changesets_dir = dir_path.join("content").join("changesets");
+
+    let bounding_boxes = get_bounding_boxes().await?;
 
     for id in local_id..remote_id {
         info!(
@@ -442,42 +573,16 @@ async fn main() -> Result<()> {
             remote_id - local_id + 1
         );
 
-        let id_padded = format!("{:09}", id);
-        let url = format!(
-            "{}/minute/{}/{}/{}.osc.gz",
-            REPLICATION_SERVER,
-            &id_padded[0..3],
-            &id_padded[3..6],
-            &id_padded[6..9],
-        );
-        debug!("Update URL: {}", url);
-
-        let response = reqwest::get(&url).await?;
-        let body = response.bytes().await?;
-        let mut decoder = flate2::read::GzDecoder::new(&body[..]);
-        let mut xml_data = String::new();
-        decoder.read_to_string(&mut xml_data)?;
-
-        let changesets_list = get_changesets(&xml_data)?;
+        let xml_data = get_changeset_xml_data(id).await?;
+        let changesets_list = get_changesets_list(&xml_data)?;
         debug!("Changesets: {:?}", changesets_list);
 
         // Get changesets as chunks size of 20 and iter over it
         // to avoid 414 Request-URI Too Large
 
         let chunks = changesets_list.chunks(20);
-
         for _changesets_list in chunks {
-            let changesets_csv = _changesets_list.join(",");
-            let changesets_url = format!(
-                "https://api.openstreetmap.org/api/0.6/changesets?changesets={}",
-                changesets_csv
-            );
-
-            let response = reqwest::get(&changesets_url).await?;
-            let body = response.text().await?;
-            debug!("XML: {}", body);
-
-            let osm_data: Osm = from_str(&body)?;
+            let osm_data = get_osm_data(_changesets_list).await?;
             debug!("Changesets: {:?}", osm_data);
 
             for changeset in osm_data.changeset {
@@ -494,62 +599,47 @@ async fn main() -> Result<()> {
                 }
 
                 if !tags.is_empty() {
-                    let comment = changeset
-                        .tag
-                        .as_ref()
-                        .and_then(|tags| {
-                            tags.iter()
-                                .find(|tag| tag.k == "comment")
-                                .map(|tag| tag.v.clone())
-                        })
-                        .unwrap_or_else(|| "".to_string());
-                    
+                    let comment = get_tag_value(&changeset, "comment").await;
+                    let created_by = get_tag_value(&changeset, "created_by").await;
                     let bbox = changeset.bbox.unwrap_or_default();
-
-                    let created_by = changeset
-                        .tag
-                        .as_ref()
-                        .and_then(|tags| {
-                            tags.iter()
-                                .find(|tag| tag.k == "created_by")
-                                .map(|tag| tag.v.clone())
-                        })
-                        .unwrap_or_else(|| "".to_string());
+                    let title = format!("Changeset #{}", changeset.id);
+                    let publish_date = changeset.created_at.clone();
+                    let user = changeset.user;
+                    let id = changeset.id;
 
                     let content = Content {
-                        title: format!("Changeset #{}", changeset.id),
-                        publish_date: changeset.created_at.clone(),
-                        id: changeset.id,
-                        user: changeset.user,
+                        id,
+                        user,
+                        title,
+                        publish_date,
                         comment,
                         created_by,
                         tags,
-                        bbox: bbox,
+                        bbox,
                     };
 
-                    let yaml_string = serde_yaml::to_string(&content)?;
-                    let file_path = dir_path
-                        .join("content")
-                        .join("changesets")
-                        .join(format!("{}.md", changeset.id));
-                    let file_content = format!("---\n{}\n---\n", yaml_string);
-
-                    fs::write(&file_path, file_content)
-                        .await
-                        .context("Failed to write changeset file")?;
+                    let file_path = changesets_dir.join(format!("{}.md", changeset.id));
+                    dump_data(&file_path, &content).await?;
+                    debug!("Changeset {} saved as {:?}", changeset.id, file_path);
                 }
             }
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
         write_local_latest_changeset_id(id).await?;
     }
 
+    cleanup(&changesets_dir).await?;
+    Ok(())
+}
+
+async fn cleanup(changesets_dir: &PathBuf) -> Result<()> {
     // Get files older than 1 year and remove them
     let one_year_ago = chrono::Utc::now() - chrono::Duration::days(365);
-    let changesets_dir = dir_path.join("content").join("changesets");
-    info!("Removing files older than one year in: {:?}", changesets_dir);
+    info!(
+        "Removing files older than one year in: {:?}",
+        changesets_dir
+    );
 
     // iter over dir *.md files and remove those older than one year
     let mut iter_files = fs::read_dir(changesets_dir).await?;
@@ -565,6 +655,5 @@ async fn main() -> Result<()> {
             }
         }
     }
-
     Ok(())
 }
