@@ -15,5 +15,6 @@ flate2 = "1.0"
 serde_yaml = "0.9"
 xml = "0.8"
 chrono = "0.4"
-geo = "0.26"
+geo = { version="0.26", features = ["serde"] }
+geo-types = { version="0.7", features = ["serde"]}
 geojson = "0.23"
