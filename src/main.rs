@@ -152,20 +152,25 @@ trait Boundaries {
 }
 
 struct BoundingPolygon {
-    polygon: Polygon,
+    polygons: Vec<Polygon>,
+}
+
+async fn get_overpass(query: &TurbopassQuery) -> Result<Overpass> {
+    let turbopass_query = format!("[out:xml]; {}; out geom;", query);
+    let turbopass_query_url = format!(
+        "https://overpass-api.de/api/interpreter?data={}",
+        turbopass_query
+    );
+    let response = reqwest::get(&turbopass_query_url).await?;
+    let xml_data = response.text().await?;
+    let overpass: Overpass = from_str(&xml_data)?;
+    Ok(overpass)
 }
 
 impl BoundingPolygon {
     async fn new(query: TurbopassQuery) -> Result<Self> {
         info!("Calculating bounding polygon for query: {}", query);
-        let turbopass_query = format!("[out:xml]; {}; out geom;", query);
-        let turbopass_query_url = format!(
-            "https://overpass-api.de/api/interpreter?data={}",
-            turbopass_query
-        );
-        let response = reqwest::get(&turbopass_query_url).await?;
-        let xml_data = response.text().await?;
-        let overpass: Overpass = from_str(&xml_data)?;
+        let overpass = get_overpass(&query).await?;
 
         let mut polygon_points = vec![];
         // pop first way as current way
@@ -219,17 +224,17 @@ impl BoundingPolygon {
         // use geo::SimplifyVw;
         //let simplified_polygon = polygon.simplify_vw(&0.000001);
         //info!("Polygon points count after simplification: {}", simplified_polygon.exterior().0.len());
-        Ok(Self { polygon })
+        let polygons = vec![polygon];
+        Ok(Self { polygons })
     }
 }
 
 impl Boundaries for BoundingPolygon {
     fn intersects(&self, other: &BoundingBox) -> bool {
         // in some cases it cound be a point when coords are the same
+        let polygon = &self.polygons[0];
         if other.min_lon == other.max_lon && other.min_lat == other.max_lat {
-            return self
-                .polygon
-                .contains(&geo::Point::new(other.min_lon, other.min_lat));
+            return polygon.contains(&geo::Point::new(other.min_lon, other.min_lat));
         }
         // counterclockwise order for the exterior ring
         let other_polygon_points = vec![
@@ -240,7 +245,7 @@ impl Boundaries for BoundingPolygon {
             (other.min_lon, other.min_lat), // Close the loop (back to bottom-left)
         ];
         let other_polygon = Polygon::new(other_polygon_points.into(), vec![]);
-        self.polygon.contains(&other_polygon)
+        polygon.contains(&other_polygon)
     }
 }
 
@@ -383,10 +388,30 @@ async fn get_osm_data(chunk: &[String]) -> Result<Osm> {
     Ok(osm_data)
 }
 
+async fn dump_data(file_path: &PathBuf, content: &Content) -> Result<()> {
+    let yaml_string = serde_yaml::to_string(&content)?;
+    let file_content = format!("---\n{}\n---\n", yaml_string);
+    fs::write(&file_path, file_content)
+        .await
+        .context("Failed to write changeset file")?;
+    Ok(())
+}
+
+async fn get_tag_value(changeset: &Changeset, tag_name: &str) -> String {
+    match &changeset.tag {
+        Some(tags) => match tags.iter().find(|tag| tag.k == tag_name) {
+            Some(tag) => tag.v.clone(),
+            None => String::new(),
+        },
+        None => String::new(),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
     let dir_path = get_home_folder().await?;
+    let changesets_dir = dir_path.join("content").join("changesets");
 
     let bounding_boxes: Vec<(&str, Box<dyn Boundaries>)> = vec![
         (
@@ -557,61 +582,43 @@ async fn main() -> Result<()> {
                 }
 
                 if !tags.is_empty() {
-                    let comment = changeset
-                        .tag
-                        .as_ref()
-                        .and_then(|tags| {
-                            tags.iter()
-                                .find(|tag| tag.k == "comment")
-                                .map(|tag| tag.v.clone())
-                        })
-                        .unwrap_or_else(|| "".to_string());
-
+                    let comment = get_tag_value(&changeset, "comment").await;
+                    let created_by = get_tag_value(&changeset, "created_by").await;
                     let bbox = changeset.bbox.unwrap_or_default();
-
-                    let created_by = changeset
-                        .tag
-                        .as_ref()
-                        .and_then(|tags| {
-                            tags.iter()
-                                .find(|tag| tag.k == "created_by")
-                                .map(|tag| tag.v.clone())
-                        })
-                        .unwrap_or_else(|| "".to_string());
+                    let title = format!("Changeset #{}", changeset.id);
+                    let publish_date = changeset.created_at.clone();
+                    let user = changeset.user;
+                    let id = changeset.id;
 
                     let content = Content {
-                        title: format!("Changeset #{}", changeset.id),
-                        publish_date: changeset.created_at.clone(),
-                        id: changeset.id,
-                        user: changeset.user,
+                        id,
+                        user,
+                        title,
+                        publish_date,
                         comment,
                         created_by,
                         tags,
-                        bbox: bbox,
+                        bbox,
                     };
 
-                    let yaml_string = serde_yaml::to_string(&content)?;
-                    let file_path = dir_path
-                        .join("content")
-                        .join("changesets")
-                        .join(format!("{}.md", changeset.id));
-                    let file_content = format!("---\n{}\n---\n", yaml_string);
-
-                    fs::write(&file_path, file_content)
-                        .await
-                        .context("Failed to write changeset file")?;
+                    let file_path = changesets_dir.join(format!("{}.md", changeset.id));
+                    dump_data(&file_path, &content).await?;
+                    debug!("Changeset {} saved as {:?}", changeset.id, file_path);
                 }
             }
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
         write_local_latest_changeset_id(id).await?;
     }
 
+    cleanup(&changesets_dir).await?;
+    Ok(())
+}
+
+async fn cleanup(changesets_dir: &PathBuf) -> Result<()> {
     // Get files older than 1 year and remove them
     let one_year_ago = chrono::Utc::now() - chrono::Duration::days(365);
-    let changesets_dir = dir_path.join("content").join("changesets");
     info!(
         "Removing files older than one year in: {:?}",
         changesets_dir
@@ -631,6 +638,5 @@ async fn main() -> Result<()> {
             }
         }
     }
-
     Ok(())
 }
