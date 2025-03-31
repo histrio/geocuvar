@@ -151,6 +151,7 @@ trait Boundaries {
     fn intersects(&self, other: &BoundingBox) -> bool;
 }
 
+#[derive(Debug, Deserialize, Serialize)]
 struct BoundingPolygon {
     polygons: Vec<Polygon>,
 }
@@ -218,6 +219,7 @@ impl BoundingPolygon {
                 panic!("no next way found");
             }
         }
+
         // Dump polygon points
         // use tokio::io::AsyncWriteExt;
         //fs::write("polygon_points.txt", format!("{:?}", polygon_points)).await?;
@@ -230,6 +232,7 @@ impl BoundingPolygon {
         //info!("Polygon points count after simplification: {}", simplified_polygon.exterior().0.len());
 
         let polygons = vec![polygon];
+
         Ok(Self { polygons })
     }
 }
@@ -273,6 +276,9 @@ impl Boundaries for BoundingBox {
             && self.max_lat > other.min_lat
     }
 }
+
+type RegionName = String;
+type BoundingBoxes = Vec<(RegionName, BoundingPolygon)>;
 
 const REPLICATION_SERVER: &str = "https://planet.openstreetmap.org/replication";
 
@@ -412,147 +418,153 @@ async fn get_tag_value(changeset: &Changeset, tag_name: &str) -> String {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    env_logger::init();
+async fn get_bounding_boxes() -> Result<BoundingBoxes> {
     let dir_path = get_home_folder().await?;
-    let changesets_dir = dir_path.join("content").join("changesets");
 
-    let bounding_boxes: Vec<(&str, Box<dyn Boundaries>)> = vec![
+    let cached_boudaries = dir_path.join("boundaries.yaml");
+
+    if cached_boudaries.is_file() {
+        let month_ago = chrono::Utc::now() - chrono::Duration::days(30);
+        let metadata = fs::metadata(&cached_boudaries).await?;
+        let created = metadata.created()?;
+        let created_time: DateTime<Utc> = created.into();
+        if created_time > month_ago {
+            info!("Cache hit in {:?}", &cached_boudaries);
+            let yaml_string = fs::read_to_string(&cached_boudaries).await?;
+            let bouding_boxes: BoundingBoxes = serde_yaml::from_str(&yaml_string)?;
+            return Ok(bouding_boxes);
+        } else {
+            info!("Cache miss: too old {:?}", created_time);
+        }
+    } else {
+        info!("Cache miss: no such file {:?}", &cached_boudaries);
+    }
+
+    let bounding_boxes: BoundingBoxes = vec![
         (
-            "Montenegro",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Crna Gora / Црна Гора']['boundary'='administrative']; way(r)"
-                        .to_string(),
-                )
-                .await?,
-            ),
+            "Montenegro".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Crna Gora / Црна Гора']['boundary'='administrative']; way(r)"
+                    .to_string(),
+            )
+            .await?,
         ),
         (
-            "Budva",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Budva']['boundary'='administrative']; way(r)".to_string(),
-                )
-                .await?,
-            ),
+            "Budva".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Budva']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Budva+",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Opština Budva']['boundary'='administrative']; way(r)"
-                        .to_string(),
-                )
-                .await?,
-            ),
+            "Budva+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Budva']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Kotor",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Kotor']['boundary'='administrative']; way(r)".to_string(),
-                )
-                .await?,
-            ),
+            "Kotor".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Kotor']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Kotor+",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Opština Kotor']['boundary'='administrative']; way(r)"
-                        .to_string(),
-                )
-                .await?,
-            ),
+            "Kotor+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Kotor']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Cetinje",
-            Box::new(
-                BoundingPolygon::new("way['name'='Cetinje']['place'='town']".to_string()).await?,
-            ),
+            "Cetinje".to_string(),
+            BoundingPolygon::new("way['name'='Cetinje']['place'='town']".to_string()).await?,
         ),
         (
-            "Cetinje+",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Prijestolnica Cetinje']['boundary'='administrative']; way(r)"
-                        .to_string(),
-                )
-                .await?,
-            ),
+            "Cetinje+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Prijestolnica Cetinje']['boundary'='administrative']; way(r)"
+                    .to_string(),
+            )
+            .await?,
         ),
         (
-            "Tivat",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Tivat']['boundary'='administrative']; way(r)".to_string(),
-                )
-                .await?,
-            ),
+            "Tivat".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Tivat']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         /* (
-            "Tivat+",
+            "Tivat+".to_string(),
             //BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
             Box::new(BoundingPolygon::new("relation['name'='Opština Tivat']['boundary'='administrative']; way(r)".to_string()).await?),
         ), */
         (
-            "Bar",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Bar']['boundary'='administrative']; way(r)".to_string(),
-                )
-                .await?,
-            ),
+            "Bar".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Bar']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         /* (
-            "Bar+",
+            "Bar+".to_string(),
             Box::new(BoundingPolygon::new("relation['name'='Opština Bar']['boundary'='administrative']; way(r)".to_string()).await?),
         ), */
         (
-            "Podgorica",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Podgorica']['boundary'='administrative']; way(r)".to_string(),
-                )
-                .await?,
-            ),
+            "Podgorica".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Podgorica']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Podgorica+",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Glavni grad Podgorica']['boundary'='administrative']; way(r)"
-                        .to_string(),
-                )
-                .await?,
-            ),
+            "Podgorica+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Glavni grad Podgorica']['boundary'='administrative']; way(r)"
+                    .to_string(),
+            )
+            .await?,
         ),
         (
-            "Nikšić",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Nikšić']['boundary'='administrative']; way(r)".to_string(),
-                )
-                .await?,
-            ),
+            "Nikšić".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Nikšić']['boundary'='administrative']; way(r)".to_string(),
+            )
+            .await?,
         ),
         (
-            "Nikšić+",
-            Box::new(
-                BoundingPolygon::new(
-                    "relation['name'='Opština Nikšić']['boundary'='administrative']; way(r)"
-                        .to_string(),
-                )
-                .await?,
-            ),
+            "Nikšić+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Nikšić']['boundary'='administrative']; way(r)"
+                    .to_string(),
+            )
+            .await?,
         ),
     ];
+
+    let yaml_string = serde_yaml::to_string(&bounding_boxes)?;
+    fs::write(&cached_boudaries, yaml_string)
+        .await
+        .context(format!("Can't crate cache file: {:?}", &cached_boudaries))?;
+
+    Ok(bounding_boxes)
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    env_logger::init();
+
+    let dir_path = get_home_folder().await?;
 
     let remote_id = get_remote_latest_changeset_id().await?;
     let local_id = get_local_latest_changeset_id().await?;
     debug!("Remote ID: {}, Local ID: {}", remote_id, local_id);
+
+    let changesets_dir = dir_path.join("content").join("changesets");
+
+    let bounding_boxes = get_bounding_boxes().await?;
 
     for id in local_id..remote_id {
         info!(
