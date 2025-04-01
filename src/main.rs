@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use log::{debug, info};
+use log::{debug, info, warn};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_xml_rs::from_str;
@@ -14,6 +14,8 @@ use geo::algorithm::contains::Contains;
 use geo::Polygon;
 
 use chrono::{DateTime, Utc};
+
+use geo::{coord};
 
 // Declare turbopass query as string alias
 type TurbopassQuery = String;
@@ -176,62 +178,84 @@ async fn get_overpass(query: &TurbopassQuery) -> Result<Overpass> {
 impl BoundingPolygon {
     async fn new(query: TurbopassQuery) -> Result<Self> {
         let overpass = get_overpass(&query).await?;
+        let ways = &overpass.ways;
 
-        let mut polygon_points = vec![];
-        // pop first way as current way
-        let mut current_way = &overpass.ways[0];
-        let mut reverse = false;
-        let mut processed_ways = vec![];
-        while !processed_ways.contains(&current_way.id) {
-            processed_ways.push(current_way.id);
-            if reverse {
-                for node in current_way.nodes.iter().rev() {
-                    polygon_points.push((node.lon, node.lat));
-                }
-            } else {
-                for node in current_way.nodes.iter() {
-                    polygon_points.push((node.lon, node.lat));
-                }
+        let mut polygons = Vec::new();
+        let mut visited = HashSet::new();
+
+        // Iterate over all ways; each unvisited way can start a new polygon
+        for start_way in ways {
+            if visited.contains(&start_way.id) {
+                continue;
             }
 
-            let last_node = if reverse {
-                current_way.nodes.first().unwrap()
-            } else {
-                current_way.nodes.last().unwrap()
-            };
+            let mut polygon_points = Vec::new();
+            let mut current_way = start_way;
+            let mut reverse = false;
+            visited.insert(current_way.id);
 
-            // find next way
-            if let Some(next_way) = overpass.ways.iter().find(|way| {
-                way.nodes.first().unwrap().ref_id == last_node.ref_id && way.id != current_way.id
-            }) {
-                reverse = false;
-                current_way = next_way;
-            } else if let Some(next_way) = overpass.ways.iter().find(|way| {
-                way.nodes.last().unwrap().ref_id == last_node.ref_id && way.id != current_way.id
-            }) {
-                reverse = true;
-                current_way = next_way;
-            } else {
-                let ways_count = overpass.ways.len();
-                if ways_count == processed_ways.len() {
+            let first_node_id = current_way.nodes.first().unwrap().ref_id;
+
+            loop {
+                if reverse {
+                    for node in current_way.nodes.iter().rev() {
+                        polygon_points.push((node.lon, node.lat));
+                    }
+                } else {
+                    for node in current_way.nodes.iter() {
+                        polygon_points.push((node.lon, node.lat));
+                    }
+                }
+
+                let last_node = if reverse {
+                    current_way.nodes.first().unwrap()
+                } else {
+                    current_way.nodes.last().unwrap()
+                };
+                if last_node.ref_id == first_node_id {
                     break;
                 }
-                panic!("no next way found");
+
+                if let Some(next_way) = ways.iter().find(|way| {
+                    !visited.contains(&way.id)
+                        && way.nodes.first().map_or(false, |n| n.ref_id == last_node.ref_id)
+                }) {
+                    reverse = false;
+                    visited.insert(next_way.id);
+                    current_way = next_way;
+                } else if let Some(next_way) = ways.iter().find(|way| {
+                    !visited.contains(&way.id)
+                        && way.nodes.last().map_or(false, |n| n.ref_id == last_node.ref_id)
+                }) {
+                    reverse = true;
+                    visited.insert(next_way.id);
+                    current_way = next_way;
+                } else {
+                    warn!("No next way found for way {}", current_way.id);
+                    break;
+                }
             }
+
+            if let Some(first_pt) = polygon_points.first().cloned() {
+                let last_pt = polygon_points.last().cloned().unwrap();
+                if first_pt != last_pt {
+                    polygon_points.push(first_pt); // close the ring
+                }
+            }
+
+            let polygon = Polygon::new(
+                polygon_points
+                    .into_iter()
+                    .map(|(lon, lat)| coord! { x: lon, y: lat })
+                    .collect::<Vec<_>>()
+                    .into(),
+                vec![], // no interior holes
+            );
+            info!("Polygon exterior has {} points", polygon.exterior().0.len());
+            polygons.push(polygon);
         }
 
-        // Dump polygon points
-        // use tokio::io::AsyncWriteExt;
-        //fs::write("polygon_points.txt", format!("{:?}", polygon_points)).await?;
-
-        let polygon = Polygon::new(polygon_points.into(), vec![]);
-        info!("Polygon points count: {}", polygon.exterior().0.len());
-
-        // use geo::SimplifyVw;
-        //let simplified_polygon = polygon.simplify_vw(&0.000001);
-        //info!("Polygon points count after simplification: {}", simplified_polygon.exterior().0.len());
-
-        let polygons = vec![polygon];
+        info!("Detected {} polygons", polygons.len());
 
         Ok(Self { polygons })
     }
@@ -240,20 +264,25 @@ impl BoundingPolygon {
 impl Boundaries for BoundingPolygon {
     fn intersects(&self, other: &BoundingBox) -> bool {
         // in some cases it count be a point when coords are the same
-        let polygon = &self.polygons[0];
-        if other.min_lon == other.max_lon && other.min_lat == other.max_lat {
-            return polygon.contains(&geo::Point::new(other.min_lon, other.min_lat));
+        // let polygon = &self.polygons[0];
+        for polygon in &self.polygons {
+            if other.min_lon == other.max_lon && other.min_lat == other.max_lat {
+                return polygon.contains(&geo::Point::new(other.min_lon, other.min_lat));
+            }
+            // counterclockwise order for the exterior ring
+            let other_polygon_points = vec![
+                (other.min_lon, other.min_lat), // Bottom-left
+                (other.max_lon, other.min_lat), // Bottom-right
+                (other.max_lon, other.max_lat), // Top-right
+                (other.min_lon, other.max_lat), // Top-left
+                (other.min_lon, other.min_lat), // Close the loop (back to bottom-left)
+            ];
+            let other_polygon = Polygon::new(other_polygon_points.into(), vec![]);
+            if polygon.contains(&other_polygon) {
+                return true;
+            }
         }
-        // counterclockwise order for the exterior ring
-        let other_polygon_points = vec![
-            (other.min_lon, other.min_lat), // Bottom-left
-            (other.max_lon, other.min_lat), // Bottom-right
-            (other.max_lon, other.max_lat), // Top-right
-            (other.min_lon, other.max_lat), // Top-left
-            (other.min_lon, other.min_lat), // Close the loop (back to bottom-left)
-        ];
-        let other_polygon = Polygon::new(other_polygon_points.into(), vec![]);
-        polygon.contains(&other_polygon)
+        false   
     }
 }
 
@@ -496,11 +525,10 @@ async fn get_bounding_boxes() -> Result<BoundingBoxes> {
             )
             .await?,
         ),
-        /* (
+        (
             "Tivat+".to_string(),
-            //BoundingBox::new(18.6645, 42.4014, 18.7050, 42.4350),
-            Box::new(BoundingPolygon::new("relation['name'='Opština Tivat']['boundary'='administrative']; way(r)".to_string()).await?),
-        ), */
+            BoundingPolygon::new("relation['name'='Opština Tivat']['boundary'='administrative']; way(r)".to_string()).await?,
+        ),
         (
             "Bar".to_string(),
             BoundingPolygon::new(
@@ -508,10 +536,10 @@ async fn get_bounding_boxes() -> Result<BoundingBoxes> {
             )
             .await?,
         ),
-        /* (
+        (
             "Bar+".to_string(),
-            Box::new(BoundingPolygon::new("relation['name'='Opština Bar']['boundary'='administrative']; way(r)".to_string()).await?),
-        ), */
+            BoundingPolygon::new("relation['name'='Opština Bar']['boundary'='administrative']; way(r)".to_string()).await?,
+        ),
         (
             "Podgorica".to_string(),
             BoundingPolygon::new(
@@ -538,6 +566,151 @@ async fn get_bounding_boxes() -> Result<BoundingBoxes> {
             "Nikšić+".to_string(),
             BoundingPolygon::new(
                 "relation['name'='Opština Nikšić']['boundary'='administrative']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+
+        (
+            "Andrijevica+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Andrijevica']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Herceg Novi+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Herceg Novi']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Plav+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Plav']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Plav".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Gusinje']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Berane+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Berane']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Rožaje+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Rožaje']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Petnjica+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Petnjica']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Bijelo Polje+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Bijelo Polje']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Pljevlja+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Pljevlja']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Plužine+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Plužine']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Žabljak+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Žabljak']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Šavnik+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Šavnik']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Mojkovac+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Mojkovac']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Kolašin+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Kolašin']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Danilovgrad+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Danilovgrad']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Tuzi+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Tuzi']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Zeta+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Zeta']['boundary'='administrative']['admin_level'='6']; way(r)"
+                    .to_string(),
+            )
+            .await?,
+        ),
+        (
+            "Ulcinj+".to_string(),
+            BoundingPolygon::new(
+                "relation['name'='Opština Ulcinj - Komuna e Ulqinit']['boundary'='administrative']['admin_level'='6']; way(r)"
                     .to_string(),
             )
             .await?,
@@ -630,6 +803,7 @@ async fn main() -> Result<()> {
     }
 
     cleanup(&changesets_dir).await?;
+    info!("Done");
     Ok(())
 }
 
