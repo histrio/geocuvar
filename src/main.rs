@@ -798,7 +798,7 @@ async fn main() -> Result<()> {
             }
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         write_local_latest_changeset_id(id).await?;
     }
 
