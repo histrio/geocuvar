@@ -15,15 +15,14 @@ jobs:
 
       steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          override: true
 
-      - name: Cache
+      - name: Cache dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -31,24 +30,21 @@ jobs:
             ~/.cargo/git
             target
             site/boundaries.yaml
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Build Rust application
-        run: cargo build --locked --release
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-cargo-
 
       - name: Run Rust application
-        run: RUST_LOG=info ./target/release/geocuvar
+        run: make run
 
-      - name: Github commit
+      - name: Cleanup old files
+        run: make cleanup
+
+      - name: Commit and push changes
         run: |
           git config --global user.email "me@false.org.ru"
           git config --global user.name "Rinat Sabitov"
-
-      - name: Commit update
-        run: |
           git add -A
-          git commit -m "Content update automated commit by GitHub Actions " -a || echo "No changes to commit"
-
-      - name: Push
-        run: |
+          git diff --staged --quiet || git commit -m "Content update automated commit by GitHub Actions"
           git push

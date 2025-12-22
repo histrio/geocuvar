@@ -4,7 +4,6 @@ use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_xml_rs::from_str;
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::io::Read;
 use std::path::PathBuf;
 use tokio::fs;
@@ -134,6 +133,7 @@ pub struct Node {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct Bounds {
     minlat: f64,
     minlon: f64,
@@ -287,6 +287,7 @@ impl Boundaries for BoundingPolygon {
 }
 
 impl BoundingBox {
+    #[allow(dead_code)]
     fn new(min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> Self {
         Self {
             min_lon,
@@ -802,32 +803,6 @@ async fn main() -> Result<()> {
         write_local_latest_changeset_id(id).await?;
     }
 
-    cleanup(&changesets_dir).await?;
     info!("Done");
-    Ok(())
-}
-
-async fn cleanup(changesets_dir: &PathBuf) -> Result<()> {
-    // Get files older than 1 year and remove them
-    let one_year_ago = chrono::Utc::now() - chrono::Duration::days(365);
-    info!(
-        "Removing files older than one year in: {:?}",
-        changesets_dir
-    );
-
-    // iter over dir *.md files and remove those older than one year
-    let mut iter_files = fs::read_dir(changesets_dir).await?;
-    while let Some(entry_result) = iter_files.next_entry().await? {
-        if entry_result.path().extension().and_then(OsStr::to_str) == Some("md") {
-            let metadata = entry_result.metadata().await?;
-            if let Ok(modified) = metadata.modified() {
-                let modified_time: DateTime<Utc> = modified.into();
-                if modified_time < one_year_ago {
-                    info!("Removing file: {:?}", entry_result.path());
-                    fs::remove_file(entry_result.path()).await?;
-                }
-            }
-        }
-    }
     Ok(())
 }
