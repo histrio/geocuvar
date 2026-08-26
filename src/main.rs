@@ -567,11 +567,13 @@ async fn main() -> Result<()> {
 
     let bounding_boxes = get_bounding_boxes(&client).await?;
 
-    for id in local_id..remote_id {
+    // `sequence` stores the id of the last fully-processed diff; resume from the
+    // next one so the boundary diff is not downloaded and re-queried every run.
+    for id in local_id + 1..remote_id {
         info!(
             "Processing changeset {} of {}",
-            id - local_id + 1,
-            remote_id - local_id + 1
+            id - local_id,
+            remote_id - local_id - 1
         );
 
         let xml_data = get_changeset_xml_data(&client, id).await?;
