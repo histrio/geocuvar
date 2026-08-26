@@ -3,7 +3,7 @@ use log::{debug, info, warn};
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_xml_rs::from_str;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::PathBuf;
 use tokio::fs;
@@ -158,7 +158,7 @@ struct BoundingPolygon {
     polygons: Vec<Polygon>,
 }
 
-async fn get_overpass(query: &TurbopassQuery) -> Result<Overpass> {
+async fn get_overpass(client: &reqwest::Client, query: &TurbopassQuery) -> Result<Overpass> {
     let turbopass_query = format!("[out:xml]; {}; out geom;", query);
 
     info!(
@@ -169,21 +169,38 @@ async fn get_overpass(query: &TurbopassQuery) -> Result<Overpass> {
         "https://overpass-api.de/api/interpreter?data={}",
         turbopass_query
     );
-    let response = reqwest::get(&turbopass_query_url).await?;
+    let response = client.get(&turbopass_query_url).send().await?;
     let xml_data = response.text().await?;
     let overpass: Overpass = from_str(&xml_data)?;
     Ok(overpass)
 }
 
 impl BoundingPolygon {
-    async fn new(query: TurbopassQuery) -> Result<Self> {
-        let overpass = get_overpass(&query).await?;
+    async fn new(client: &reqwest::Client, query: TurbopassQuery) -> Result<Self> {
+        let overpass = get_overpass(client, &query).await?;
         let ways = &overpass.ways;
 
         let mut polygons = Vec::new();
         let mut visited = HashSet::new();
 
-        // Iterate over all ways; each unvisited way can start a new polygon
+        let mut way_by_first_node: HashMap<i64, Vec<&Way>> = HashMap::new();
+        let mut way_by_last_node: HashMap<i64, Vec<&Way>> = HashMap::new();
+
+        for way in ways {
+            if let Some(first_node) = way.nodes.first() {
+                way_by_first_node
+                    .entry(first_node.ref_id)
+                    .or_insert_with(Vec::new)
+                    .push(way);
+            }
+            if let Some(last_node) = way.nodes.last() {
+                way_by_last_node
+                    .entry(last_node.ref_id)
+                    .or_insert_with(Vec::new)
+                    .push(way);
+            }
+        }
+
         for start_way in ways {
             if visited.contains(&start_way.id) {
                 continue;
@@ -216,18 +233,19 @@ impl BoundingPolygon {
                     break;
                 }
 
-                if let Some(next_way) = ways.iter().find(|way| {
-                    !visited.contains(&way.id)
-                        && way.nodes.first().map_or(false, |n| n.ref_id == last_node.ref_id)
-                }) {
-                    reverse = false;
-                    visited.insert(next_way.id);
-                    current_way = next_way;
-                } else if let Some(next_way) = ways.iter().find(|way| {
-                    !visited.contains(&way.id)
-                        && way.nodes.last().map_or(false, |n| n.ref_id == last_node.ref_id)
-                }) {
-                    reverse = true;
+                let next_way_opt = way_by_first_node
+                    .get(&last_node.ref_id)
+                    .and_then(|ways| ways.iter().find(|way| !visited.contains(&way.id)))
+                    .map(|way| (way, false))
+                    .or_else(|| {
+                        way_by_last_node
+                            .get(&last_node.ref_id)
+                            .and_then(|ways| ways.iter().find(|way| !visited.contains(&way.id)))
+                            .map(|way| (way, true))
+                    });
+
+                if let Some((next_way, should_reverse)) = next_way_opt {
+                    reverse = should_reverse;
                     visited.insert(next_way.id);
                     current_way = next_way;
                 } else {
@@ -239,7 +257,7 @@ impl BoundingPolygon {
             if let Some(first_pt) = polygon_points.first().cloned() {
                 let last_pt = polygon_points.last().cloned().unwrap();
                 if first_pt != last_pt {
-                    polygon_points.push(first_pt); // close the ring
+                    polygon_points.push(first_pt);
                 }
             }
 
@@ -249,7 +267,7 @@ impl BoundingPolygon {
                     .map(|(lon, lat)| coord! { x: lon, y: lat })
                     .collect::<Vec<_>>()
                     .into(),
-                vec![], // no interior holes
+                vec![],
             );
             info!("Polygon exterior has {} points", polygon.exterior().0.len());
             polygons.push(polygon);
@@ -312,9 +330,9 @@ type BoundingBoxes = Vec<(RegionName, BoundingPolygon)>;
 
 const REPLICATION_SERVER: &str = "https://planet.openstreetmap.org/replication";
 
-async fn get_remote_latest_changeset_id() -> Result<i32> {
+async fn get_remote_latest_changeset_id(client: &reqwest::Client) -> Result<i32> {
     let url = format!("{}/minute/state.txt", REPLICATION_SERVER);
-    let response = reqwest::get(url).await?;
+    let response = client.get(url).send().await?;
     let body = response.text().await?;
 
     let prefix = "sequenceNumber=";
@@ -395,7 +413,7 @@ fn get_changesets_list(xml_data: &str) -> Result<Vec<ChangesetID>> {
     Ok(unique_values.into_iter().collect())
 }
 
-async fn get_changeset_xml_data(id: i32) -> Result<String> {
+async fn get_changeset_xml_data(client: &reqwest::Client, id: i32) -> Result<String> {
     let id_padded = format!("{:09}", id);
     let url = format!(
         "{}/minute/{}/{}/{}.osc.gz",
@@ -406,22 +424,22 @@ async fn get_changeset_xml_data(id: i32) -> Result<String> {
     );
     debug!("Update URL: {}", url);
 
-    let response = reqwest::get(&url).await?;
+    let response = client.get(&url).send().await?;
     let body = response.bytes().await?;
     let mut decoder = flate2::read::GzDecoder::new(&body[..]);
     let mut xml_data = String::new();
     decoder.read_to_string(&mut xml_data)?;
-    Ok(xml_data.to_string())
+    Ok(xml_data)
 }
 
-async fn get_osm_data(chunk: &[String]) -> Result<Osm> {
+async fn get_osm_data(client: &reqwest::Client, chunk: &[String]) -> Result<Osm> {
     let changesets_csv = chunk.join(",");
     let changesets_url = format!(
         "https://api.openstreetmap.org/api/0.6/changesets?changesets={}",
         changesets_csv
     );
 
-    let response = reqwest::get(&changesets_url).await?;
+    let response = client.get(&changesets_url).send().await?;
     let body = response.text().await?;
     debug!("XML: {}", body);
 
@@ -438,7 +456,7 @@ async fn dump_data(file_path: &PathBuf, content: &Content) -> Result<()> {
     Ok(())
 }
 
-async fn get_tag_value(changeset: &Changeset, tag_name: &str) -> String {
+fn get_tag_value(changeset: &Changeset, tag_name: &str) -> String {
     match &changeset.tag {
         Some(tags) => match tags.iter().find(|tag| tag.k == tag_name) {
             Some(tag) => tag.v.clone(),
@@ -448,7 +466,7 @@ async fn get_tag_value(changeset: &Changeset, tag_name: &str) -> String {
     }
 }
 
-async fn get_bounding_boxes() -> Result<BoundingBoxes> {
+async fn get_bounding_boxes(client: &reqwest::Client) -> Result<BoundingBoxes> {
     let dir_path = get_home_folder().await?;
 
     let cached_boundaries = dir_path.join("boundaries.yaml");
@@ -470,253 +488,57 @@ async fn get_bounding_boxes() -> Result<BoundingBoxes> {
         info!("Cache miss: no such file {:?}", &cached_boundaries);
     }
 
-    let bounding_boxes: BoundingBoxes = vec![
-        (
-            "Montenegro".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Crna Gora / Црна Гора']['boundary'='administrative']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Budva".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Budva']['boundary'='administrative']; way(r)".to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Budva+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Budva']['boundary'='administrative']; way(r)".to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Kotor".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Kotor']['boundary'='administrative']; way(r)".to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Kotor+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Kotor']['boundary'='administrative']; way(r)".to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Cetinje".to_string(),
-            BoundingPolygon::new("way['name'='Cetinje']['place'='town']".to_string()).await?,
-        ),
-        (
-            "Cetinje+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Prijestolnica Cetinje']['boundary'='administrative']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Tivat".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Tivat']['boundary'='administrative']; way(r)".to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Tivat+".to_string(),
-            BoundingPolygon::new("relation['name'='Opština Tivat']['boundary'='administrative']; way(r)".to_string()).await?,
-        ),
-        (
-            "Bar".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Bar']['boundary'='administrative']; way(r)".to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Bar+".to_string(),
-            BoundingPolygon::new("relation['name'='Opština Bar']['boundary'='administrative']; way(r)".to_string()).await?,
-        ),
-        (
-            "Podgorica".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Podgorica']['boundary'='administrative']; way(r)".to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Podgorica+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Glavni grad Podgorica']['boundary'='administrative']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Nikšić".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Nikšić']['boundary'='administrative']; way(r)".to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Nikšić+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Nikšić']['boundary'='administrative']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-
-        (
-            "Andrijevica+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Andrijevica']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Herceg Novi+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Herceg Novi']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Plav+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Plav']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Plav".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Gusinje']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Berane+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Berane']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Rožaje+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Rožaje']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Petnjica+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Petnjica']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Bijelo Polje+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Bijelo Polje']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Pljevlja+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Pljevlja']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Plužine+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Plužine']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Žabljak+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Žabljak']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Šavnik+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Šavnik']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Mojkovac+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Mojkovac']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Kolašin+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Kolašin']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Danilovgrad+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Danilovgrad']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Tuzi+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Tuzi']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Zeta+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Zeta']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
-        (
-            "Ulcinj+".to_string(),
-            BoundingPolygon::new(
-                "relation['name'='Opština Ulcinj - Komuna e Ulqinit']['boundary'='administrative']['admin_level'='6']; way(r)"
-                    .to_string(),
-            )
-            .await?,
-        ),
+    let queries = vec![
+        ("Montenegro".to_string(), "relation['name'='Crna Gora / Црна Гора']['boundary'='administrative']; way(r)".to_string()),
+        ("Budva".to_string(), "relation['name'='Budva']['boundary'='administrative']; way(r)".to_string()),
+        ("Budva+".to_string(), "relation['name'='Opština Budva']['boundary'='administrative']; way(r)".to_string()),
+        ("Kotor".to_string(), "relation['name'='Kotor']['boundary'='administrative']; way(r)".to_string()),
+        ("Kotor+".to_string(), "relation['name'='Opština Kotor']['boundary'='administrative']; way(r)".to_string()),
+        ("Cetinje".to_string(), "way['name'='Cetinje']['place'='town']".to_string()),
+        ("Cetinje+".to_string(), "relation['name'='Prijestolnica Cetinje']['boundary'='administrative']; way(r)".to_string()),
+        ("Tivat".to_string(), "relation['name'='Tivat']['boundary'='administrative']; way(r)".to_string()),
+        ("Tivat+".to_string(), "relation['name'='Opština Tivat']['boundary'='administrative']; way(r)".to_string()),
+        ("Bar".to_string(), "relation['name'='Bar']['boundary'='administrative']; way(r)".to_string()),
+        ("Bar+".to_string(), "relation['name'='Opština Bar']['boundary'='administrative']; way(r)".to_string()),
+        ("Podgorica".to_string(), "relation['name'='Podgorica']['boundary'='administrative']; way(r)".to_string()),
+        ("Podgorica+".to_string(), "relation['name'='Glavni grad Podgorica']['boundary'='administrative']; way(r)".to_string()),
+        ("Nikšić".to_string(), "relation['name'='Nikšić']['boundary'='administrative']; way(r)".to_string()),
+        ("Nikšić+".to_string(), "relation['name'='Opština Nikšić']['boundary'='administrative']; way(r)".to_string()),
+        ("Andrijevica+".to_string(), "relation['name'='Opština Andrijevica']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Herceg Novi+".to_string(), "relation['name'='Opština Herceg Novi']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Plav+".to_string(), "relation['name'='Opština Plav']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Plav".to_string(), "relation['name'='Opština Gusinje']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Berane+".to_string(), "relation['name'='Opština Berane']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Rožaje+".to_string(), "relation['name'='Opština Rožaje']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Petnjica+".to_string(), "relation['name'='Opština Petnjica']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Bijelo Polje+".to_string(), "relation['name'='Opština Bijelo Polje']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Pljevlja+".to_string(), "relation['name'='Opština Pljevlja']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Plužine+".to_string(), "relation['name'='Opština Plužine']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Žabljak+".to_string(), "relation['name'='Opština Žabljak']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Šavnik+".to_string(), "relation['name'='Opština Šavnik']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Mojkovac+".to_string(), "relation['name'='Opština Mojkovac']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Kolašin+".to_string(), "relation['name'='Opština Kolašin']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Danilovgrad+".to_string(), "relation['name'='Opština Danilovgrad']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Tuzi+".to_string(), "relation['name'='Opština Tuzi']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Zeta+".to_string(), "relation['name'='Opština Zeta']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
+        ("Ulcinj+".to_string(), "relation['name'='Opština Ulcinj - Komuna e Ulqinit']['boundary'='administrative']['admin_level'='6']; way(r)".to_string()),
     ];
+
+    let futures: Vec<_> = queries
+        .into_iter()
+        .map(|(name, query)| {
+            let client = client.clone();
+            tokio::spawn(async move {
+                let polygon = BoundingPolygon::new(&client, query).await?;
+                Ok::<_, anyhow::Error>((name, polygon))
+            })
+        })
+        .collect();
+
+    let mut bounding_boxes = Vec::new();
+    for future in futures {
+        bounding_boxes.push(future.await??);
+    }
 
     let yaml_string = serde_yaml::to_string(&bounding_boxes)?;
     fs::write(&cached_boundaries, yaml_string)
@@ -730,15 +552,19 @@ async fn get_bounding_boxes() -> Result<BoundingBoxes> {
 async fn main() -> Result<()> {
     env_logger::init();
 
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
     let dir_path = get_home_folder().await?;
 
-    let remote_id = get_remote_latest_changeset_id().await?;
+    let remote_id = get_remote_latest_changeset_id(&client).await?;
     let local_id = get_local_latest_changeset_id().await?;
     debug!("Remote ID: {}, Local ID: {}", remote_id, local_id);
 
     let changesets_dir = dir_path.join("content").join("changesets");
 
-    let bounding_boxes = get_bounding_boxes().await?;
+    let bounding_boxes = get_bounding_boxes(&client).await?;
 
     for id in local_id..remote_id {
         info!(
@@ -747,16 +573,13 @@ async fn main() -> Result<()> {
             remote_id - local_id + 1
         );
 
-        let xml_data = get_changeset_xml_data(id).await?;
+        let xml_data = get_changeset_xml_data(&client, id).await?;
         let changesets_list = get_changesets_list(&xml_data)?;
         debug!("Changesets: {:?}", changesets_list);
 
-        // Get changesets as chunks size of 20 and iter over it
-        // to avoid 414 Request-URI Too Large
-
         let chunks = changesets_list.chunks(20);
-        for _changesets_list in chunks {
-            let osm_data = get_osm_data(_changesets_list).await?;
+        for chunk in chunks {
+            let osm_data = get_osm_data(&client, chunk).await?;
             debug!("Changesets: {:?}", osm_data);
 
             for changeset in osm_data.changeset {
@@ -773,8 +596,8 @@ async fn main() -> Result<()> {
                 }
 
                 if !tags.is_empty() {
-                    let comment = get_tag_value(&changeset, "comment").await;
-                    let created_by = get_tag_value(&changeset, "created_by").await;
+                    let comment = get_tag_value(&changeset, "comment");
+                    let created_by = get_tag_value(&changeset, "created_by");
                     let bbox = changeset.bbox.unwrap_or_default();
                     let title = format!("Changeset #{}", changeset.id);
                     let publish_date = changeset.created_at.clone();
