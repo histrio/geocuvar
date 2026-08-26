@@ -553,6 +553,7 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     let client = reqwest::Client::builder()
+        .user_agent("geocuvar/0.1.0 (+https://github.com/histrio/geocuvar)")
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
 
