@@ -17,26 +17,24 @@
     <link>{{ .Permalink }}</link>
     <description>Recent content {{ if ne .Title .Site.Title }}{{ with .Title }}in {{ . }} {{ end }}{{ end }}on {{ .Site.Title }}</description>
     <generator>Hugo</generator>
-    <language>{{ site.Language.LanguageCode }}</language>
-    <managingEditor>histrio</managingEditor>
-    <webMaster>histrio</webMaster>{{ with .Site.Copyright }}
-    <copyright>{{ . }}</copyright>{{ end }}{{ if not .Date.IsZero }}
-    <lastBuildDate>{{ (index $pages.ByLastmod.Reverse 0).Lastmod.Format "Mon, 02 Jan 2006 15:04:05 -0700" | safeHTML }}</lastBuildDate>{{ end }}
+    <language>{{ site.Language.Locale }}</language>
+    {{- with $pages }}
+      {{- with index .ByLastmod.Reverse 0 }}
+    <lastBuildDate>{{ .Lastmod.Format "Mon, 02 Jan 2006 15:04:05 -0700" | safeHTML }}</lastBuildDate>
+      {{- end }}
+    {{- end }}
     {{- with .OutputFormats.Get "RSS" }}
     {{ printf "<atom:link href=%q rel=\"self\" type=%q />" .Permalink .MediaType | safeHTML }}
     {{- end }}
     {{- range $pages }}
+    {{- $desc := printf "User <a href=\"https://www.openstreetmap.org/user/%s\">%s</a> has uploaded a <a href=\"https://www.openstreetmap.org/browse/changeset/%v\">changeset</a> in your watched area using %s, titled \"%s\"." .Params.user .Params.user .Params.id .Params.created_by .Params.comment }}
     <item>
-      <title>{{ .Title }}: {{ .Params.comment }}</title>
+      <title>{{ .Title }}{{ with .Params.comment }}: {{ . }}{{ end }}</title>
       <link>{{ .Permalink }}</link>
       <pubDate>{{ .PublishDate.Format "Mon, 02 Jan 2006 15:04:05 -0700" | safeHTML }}</pubDate>
       <author>{{ .Params.user }}</author>
       <guid>{{ .Permalink }}</guid>
-      <description>
-        User <a href="https://www.openstreetmap.org/user/{{ .Params.user }}">{{ .Params.user }}</a> 
-        has uploaded a <a href="https://www.openstreetmap.org/browse/changeset/{{ .Params.id }}">changeset</a> in your watched area 
-        using {{ .Params.created_by}}, titled "{{ .Params.comment }}". 
-      </description>
+      <description>{{ printf "<![CDATA[%s]]>" $desc | safeHTML }}</description>
       {{- if .Params.tags }}
         {{- range .Params.tags }}
       <category>{{ . }}</category>

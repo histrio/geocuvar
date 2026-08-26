@@ -1,0 +1,8 @@
+{{ define "main" }}
+<section>
+    <h2>Changesets</h2>
+    {{ $paginator := .Paginate .RegularPages }}
+    {{ partial "changeset-list.html" $paginator.Pages }}
+    {{ partial "pagination.html" $paginator }}
+</section>
+{{ end }}

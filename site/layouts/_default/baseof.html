@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ .Site.Title }}</title>
+    <title>{{ block "title" . }}{{ .Title }}{{ end }}</title>
     <link rel="stylesheet" href="{{ "css/styles.css" | relURL }}">
+    <link rel="manifest" href="{{ "site.webmanifest" | relURL }}">
 </head>
 <body>
     <header>
@@ -16,8 +17,10 @@
     </main>
     <footer>
         <nav>
-            <a href="/about/">About</a> |
-            <a href="/contact/">Contact</a>
+            {{ range $i, $item := .Site.Menus.footer }}
+                {{ if $i }}<span aria-hidden="true"> | </span>{{ end }}
+                <a href="{{ with $item.Page }}{{ .RelPermalink }}{{ else }}{{ $item.URL }}{{ end }}">{{ $item.Name }}</a>
+            {{ end }}
         </nav>
         <p>&copy; {{ now.Format "2006" }} {{ .Site.Title }}</p>
     </footer>

@@ -10,43 +10,7 @@
     </section>
     <h2>Recent Changesets</h2>
     {{ $paginator := .Paginate (where .Site.RegularPages "Section" "changesets") }}
-    <ul class="changeset-list">
-        {{ range $paginator.Pages }}
-            <li>
-                <div>
-                    <a href="{{ .Permalink }}">{{ .Title }}</a>
-                    <span>{{ .Date.Format "2006-01-02" }}</span>
-                </div>
-                <div class="tags">
-                    {{ range .Params.tags }}
-                        <a href="{{ "tags/" | relLangURL }}{{ . | urlize }}">{{ . }}</a>
-                    {{ end }}
-                </div>
-            </li>
-        {{ end }}
-    </ul>
-    <div class="pagination">
-        {{ if $paginator.HasPrev }}
-            <a href="{{ $paginator.First.URL }}">First</a>
-            <a href="{{ $paginator.Prev.URL }}">Previous</a>
-        {{ end }}
-
-        {{ $currentPage := $paginator.PageNumber }}
-        {{ $totalPages := $paginator.TotalPages }}
-
-        {{ range $i, $e := $paginator.Pagers }}
-            {{ if or (eq $i $currentPage) (and (ge $i (add $currentPage -3)) (le $i (add $currentPage 3))) }}
-                <a href="{{ .URL }}" {{ if eq .PageNumber $currentPage }}class="active"{{ end }}>{{ .PageNumber }}</a>
-            {{ else if or (eq .PageNumber 1) (eq .PageNumber $totalPages) }}
-                ...
-            {{ end }}
-        {{ end }}
-
-        {{ if $paginator.HasNext }}
-            <a href="{{ $paginator.Next.URL }}">Next</a>
-            <a href="{{ $paginator.Last.URL }}">Last</a>
-        {{ end }}
-    </div>
+    {{ partial "changeset-list.html" $paginator.Pages }}
+    {{ partial "pagination.html" $paginator }}
 </section>
-
 {{ end }}

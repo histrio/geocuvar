@@ -1,0 +1,24 @@
+{{ $paginator := . }}
+{{ $current := $paginator.PageNumber }}
+{{ $total := $paginator.TotalPages }}
+<nav class="pagination" aria-label="Pagination">
+    {{ if $paginator.HasPrev }}
+        <a href="{{ $paginator.First.URL }}">First</a>
+        <a href="{{ $paginator.Prev.URL }}">Previous</a>
+    {{ end }}
+
+    {{ range $paginator.Pagers }}
+        {{ $page := .PageNumber }}
+        {{ $show := or (eq $page 1) (eq $page $total) (and (ge $page (sub $current 3)) (le $page (add $current 3))) }}
+        {{ if $show }}
+            <a href="{{ .URL }}"{{ if eq $page $current }} class="active" aria-current="page"{{ end }}>{{ $page }}</a>
+        {{ else if or (eq $page (add $current 4)) (eq $page (sub $current 4)) }}
+            <span class="pagination-ellipsis" aria-hidden="true">…</span>
+        {{ end }}
+    {{ end }}
+
+    {{ if $paginator.HasNext }}
+        <a href="{{ $paginator.Next.URL }}">Next</a>
+        <a href="{{ $paginator.Last.URL }}">Last</a>
+    {{ end }}
+</nav>

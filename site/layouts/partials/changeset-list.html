@@ -1,0 +1,15 @@
+<ul class="changeset-list">
+    {{ range . }}
+        <li>
+            <div>
+                <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+                <span>{{ .Date.Format "2006-01-02" }}</span>
+            </div>
+            <div class="tags">
+                {{ range .Params.tags }}
+                    <a href="{{ "tags/" | relLangURL }}{{ . | urlize }}">{{ . }}</a>
+                {{ end }}
+            </div>
+        </li>
+    {{ end }}
+</ul>

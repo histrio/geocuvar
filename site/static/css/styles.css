@@ -75,6 +75,12 @@ ul {
     background-color: #bbb;
 }
 
+.pagination .pagination-ellipsis {
+    margin: 0 0.5rem;
+    padding: 0.5rem 1rem;
+    color: #666;
+}
+
 footer {
     background-color: #333;
     color: #fff;

@@ -1,6 +1,9 @@
 baseURL = 'https://geocuvar.pages.dev/'
-languageCode = 'en-us'
+locale = 'en-US'
 title = 'GEOCUVAR'
+
+[taxonomies]
+  tag = 'tags'
 
 [menus]
   [[menus.footer]]

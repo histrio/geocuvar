@@ -1,0 +1,13 @@
+{{ define "main" }}
+<section>
+    <h2>Regions</h2>
+    <ul class="tag-list">
+        {{ range $name, $taxonomy := .Data.Terms }}
+            <li>
+                <a href="{{ "tags/" | relLangURL }}{{ $name | urlize }}">{{ $name }}</a>
+                <span class="tag-count">({{ len $taxonomy }})</span>
+            </li>
+        {{ end }}
+    </ul>
+</section>
+{{ end }}
