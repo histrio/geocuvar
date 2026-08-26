@@ -2,3 +2,4 @@
 site/public
 .hugo_build.lock
 site/boundaries.yaml
+/.cargo-home
